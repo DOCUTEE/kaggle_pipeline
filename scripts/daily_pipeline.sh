@@ -1,17 +1,31 @@
 #!/usr/bin/env bash
-# Daily pipeline: Scrape → Process → Dashboard → Kaggle Push
+# Daily pipeline: Scrape → Process → Load DB → Kaggle Push
 # Runs via cron at 7:00 AM daily
-# Output: /mnt/kaggle_data/itviec/
+#
+# Usage:
+#   ./scripts/daily_pipeline.sh              # Full pipeline
+#   ./scripts/daily_pipeline.sh --skip-db    # Skip DB load
+#   ./scripts/daily_pipeline.sh --skip-kaggle # Skip Kaggle push
 
 set -euo pipefail
 
 # ─── CONFIG ───────────────────────────────────────────────────────────────────
-PROJECT_ROOT="/home/docutee/kaggle_pipeline"
+PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DATA_DIR="/mnt/kaggle_data/itviec"
 LOG_DIR="/mnt/kaggle_data/logs"
 PYTHON="python3"
 DATE=$(date +%Y-%m-%d)
 RUN_ID=$(date +%Y-%m-%d_%H%M%S)
+
+# Flags
+SKIP_DB=false
+SKIP_KAGGLE=false
+for arg in "$@"; do
+    case $arg in
+        --skip-db) SKIP_DB=true ;;
+        --skip-kaggle) SKIP_KAGGLE=true ;;
+    esac
+done
 
 # ─── SETUP ────────────────────────────────────────────────────────────────────
 mkdir -p "$DATA_DIR" "$LOG_DIR"
@@ -39,40 +53,43 @@ if [ $SCRAPE_EXIT -ne 0 ]; then
     exit 1
 fi
 
-# ─── STEP 2: PROCESS ─────────────────────────────────────────────────────────
+# ─── STEP 2: PROCESS + LOAD DB ───────────────────────────────────────────────
 echo ""
 echo "[$(date +%H:%M:%S)] Step 2: Processing data..."
 
-# Copy process script and run
-cp "$PROJECT_ROOT/dashboard/process_data.py" "$DATA_DIR/"
-cd "$DATA_DIR"
-$PYTHON process_data.py "$DATA_DIR" 2>&1
+if [ "$SKIP_DB" = true ]; then
+    # Process only (no DB)
+    $PYTHON -m pipeline.build process itviec \
+        --data-dir "$DATA_DIR" \
+        --dashboard-dir "$DATA_DIR/dashboard" \
+        2>&1
+else
+    # Process + Load to PostgreSQL
+    $PYTHON -m pipeline.build all itviec \
+        --data-dir "$DATA_DIR" \
+        --dashboard-dir "$DATA_DIR/dashboard" \
+        --load-db \
+        --skip-kaggle \
+        2>&1
+fi
 
-# ─── STEP 3: DASHBOARD ───────────────────────────────────────────────────────
-echo ""
-echo "[$(date +%H:%M:%S)] Step 3: Building dashboard..."
+# ─── STEP 3: KAGGLE PUSH ─────────────────────────────────────────────────────
+if [ "$SKIP_KAGGLE" = false ]; then
+    echo ""
+    echo "[$(date +%H:%M:%S)] Step 3: Pushing to Kaggle..."
 
-# Copy dashboard builder and run
-cp "$PROJECT_ROOT/dashboard/build_dashboard.py" "$DATA_DIR/"
-cd "$DATA_DIR"
-$PYTHON build_dashboard.py "$DATA_DIR" 2>&1
+    KAGGLE_DATASET="quangcrawler/itviec-jobs"
+    KAGGLE_DIR="$DATA_DIR/kaggle_upload"
 
-# ─── STEP 4: KAGGLE PUSH ─────────────────────────────────────────────────────
-echo ""
-echo "[$(date +%H:%M:%S)] Step 4: Pushing to Kaggle..."
+    mkdir -p "$KAGGLE_DIR"
 
-KAGGLE_DATASET="quangcrawler/itviec-jobs"
-KAGGLE_DIR="$DATA_DIR/kaggle_upload"
+    # Prepare dataset files
+    cp "$DATA_DIR/itviec_jobs_latest.csv" "$KAGGLE_DIR/itviec_jobs.csv"
+    cp "$DATA_DIR/itviec_jobs_latest.json" "$KAGGLE_DIR/itviec_jobs.json"
+    cp "$DATA_DIR/dashboard/processed_jobs.csv" "$KAGGLE_DIR/processed_jobs.csv" 2>/dev/null || true
 
-mkdir -p "$KAGGLE_DIR"
-
-# Prepare dataset files
-cp "$DATA_DIR/itviec_jobs_latest.csv" "$KAGGLE_DIR/itviec_jobs.csv"
-cp "$DATA_DIR/itviec_jobs_latest.json" "$KAGGLE_DIR/itviec_jobs.json"
-cp "$DATA_DIR/processed_jobs.csv" "$KAGGLE_DIR/processed_jobs.csv" 2>/dev/null || true
-
-# Create/update metadata
-cat > "$KAGGLE_DIR/dataset-metadata.json" << 'METAEOF'
+    # Create/update metadata
+    cat > "$KAGGLE_DIR/dataset-metadata.json" << 'METAEOF'
 {
   "title": "ITviec Vietnam IT Job Listings",
   "id": "quangcrawler/itviec-jobs",
@@ -84,25 +101,29 @@ cat > "$KAGGLE_DIR/dataset-metadata.json" << 'METAEOF'
 }
 METAEOF
 
-# Push to Kaggle
-KAGGLE_BIN="$HOME/.local/bin/kaggle"
-export KAGGLE_API_TOKEN=$(python3 -c "import json; print(json.load(open('$HOME/.kaggle/kaggle.json'))['key'])")
-export KAGGLE_USERNAME=$(python3 -c "import json; print(json.load(open('$HOME/.kaggle/kaggle.json'))['username'])")
+    # Push to Kaggle
+    KAGGLE_BIN="$HOME/.local/bin/kaggle"
+    export KAGGLE_API_TOKEN=$(python3 -c "import json; print(json.load(open('$HOME/.kaggle/kaggle.json'))['key'])")
+    export KAGGLE_USERNAME=$(python3 -c "import json; print(json.load(open('$HOME/.kaggle/kaggle.json'))['username'])")
 
-if [ -x "$KAGGLE_BIN" ] || command -v kaggle &> /dev/null; then
-    KG="${KAGGLE_BIN:-kaggle}"
-    cd "$KAGGLE_DIR"
-    $KG datasets create -p . --dir-mode zip 2>&1 || \
-    $KG datasets version -m "Daily update $DATE" -p . --dir-mode zip 2>&1
-    echo "[OK] Kaggle dataset updated"
+    if [ -x "$KAGGLE_BIN" ] || command -v kaggle &> /dev/null; then
+        KG="${KAGGLE_BIN:-kaggle}"
+        cd "$KAGGLE_DIR"
+        $KG datasets create -p . --dir-mode zip 2>&1 || \
+        $KG datasets version -m "Daily update $DATE" -p . --dir-mode zip 2>&1
+        echo "[OK] Kaggle dataset updated"
+    else
+        echo "[WARN] kaggle CLI not found, skipping push"
+        echo "Install: pip3 install --user --break-system-packages kaggle"
+    fi
 else
-    echo "[WARN] kaggle CLI not found, skipping push"
-    echo "Install: pip3 install --user --break-system-packages kaggle"
+    echo ""
+    echo "[$(date +%H:%M:%S)] Step 3: Skipped (KAGGLE)"
 fi
 
-# ─── STEP 5: CLEANUP OLD DATA (keep last 30 days) ───────────────────────────
+# ─── STEP 4: CLEANUP OLD DATA (keep last 30 days) ───────────────────────────
 echo ""
-echo "[$(date +%H:%M:%S)] Step 5: Cleaning old files..."
+echo "[$(date +%H:%M:%S)] Step 4: Cleaning old files..."
 find "$DATA_DIR" -name "itviec_jobs_*.csv" -mtime +30 -delete 2>/dev/null || true
 find "$DATA_DIR" -name "itviec_jobs_*.json" -mtime +30 -delete 2>/dev/null || true
 find "$DATA_DIR" -name "itviec_jobs_*.parquet" -mtime +30 -delete 2>/dev/null || true
@@ -112,5 +133,6 @@ echo ""
 echo "============================================"
 echo " Pipeline complete — $(date +%H:%M:%S)"
 echo " Data: $DATA_DIR"
+echo " Grafana: http://localhost:3000"
 echo " Log:  $LOG_DIR/pipeline_${DATE}.log"
 echo "============================================"

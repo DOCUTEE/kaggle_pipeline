@@ -1,24 +1,23 @@
-# 🇻🇳 ITviec Job Market Pipeline
+# 🇻🇳 Vietnam IT Job Market Pipeline
 
 > End-to-end data pipeline: **Scrape → Process → Visualize → Publish**
-> Auto-collects all IT job listings from [itviec.com](https://itviec.com) daily, builds interactive dashboards, and pushes datasets to Kaggle.
+> Auto-collects IT job listings from [itviec.com](https://itviec.com) and [topcv.vn](https://topcv.vn) daily, builds interactive dashboards, and pushes datasets to Kaggle.
 
-[![Kaggle Dataset](https://img.shields.io/badge/Kaggle-Dataset-blue?logo=kaggle)](https://www.kaggle.com/datasets/quangcrawler/itviec-jobs)
+[![Kaggle Dataset - ITviec](https://img.shields.io/badge/Kaggle-ITviec-blue?logo=kaggle)](https://www.kaggle.com/datasets/quangcrawler/itviec-jobs)
+[![Kaggle Dataset - TopCV](https://img.shields.io/badge/Kaggle-TopCV-green?logo=kaggle)](https://www.kaggle.com/datasets/docutee/topcv-it-jobs-vietnam)
 [![Python 3.12+](https://img.shields.io/badge/Python-3.12+-green)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ---
 
-## 📊 Live Dashboard Preview
+## 📊 Live Dashboard
 
-| KPI | Insight |
-|-----|---------|
-| **719** Total Jobs | From **137** companies across **9** cities |
-| **54%** Ho Chi Minh | Dominant tech hub |
-| **48%** Senior+ Roles | Senior-heavy market |
-| **2.9%** Remote | Office-first culture |
+| Dashboard | URL |
+|-----------|-----|
+| **ITviec Dashboard** | http://100.80.131.68:8501 |
+| **TopCV Dashboard** | http://100.80.131.68:8501 |
 
-> [Open Dashboard →](dashboard/itviec_dashboard.html) *(self-contained HTML, no server needed)*
+> [Open Dashboard →](http://100.80.131.68:8501)
 
 ---
 
@@ -26,20 +25,19 @@
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                    DAILY CRON (7AM)                      │
+│                    DAILY CRON (6AM)                      │
 ├─────────────────────────────────────────────────────────┤
 │                                                         │
 │  ┌──────────┐    ┌──────────┐    ┌──────────┐          │
 │  │  SCRAPE   │───▶│ PROCESS  │───▶│ DASHBOARD│          │
-│  │ itviec.com│    │ Clean +  │    │  Plotly  │          │
-│  │  36 pages │    │ Engineer │    │ 12 charts│          │
+│  │ itviec +  │    │ Clean +  │    │ Streamlit│          │
+│  │ topcv.vn  │    │ Engineer │    │ + Plotly │          │
 │  └──────────┘    └──────────┘    └──────────┘          │
 │       │                                  │              │
 │       ▼                                  ▼              │
 │  ┌──────────┐                    ┌──────────┐          │
-│  │ Raw Data │                    │  HTML +  │          │
-│  │ CSV/JSON │                    │  Kaggle  │          │
-│  │ Parquet  │                    │  Push    │          │
+│  │ Raw Data │                    │  Kaggle  │          │
+│  │ CSV/JSON │                    │  Push    │          │
 │  └──────────┘                    └──────────┘          │
 │                                                         │
 │  Server: 100.80.131.68 (Ubuntu 24.04, 8GB RAM)         │
@@ -52,129 +50,88 @@
 ## 📁 Project Structure
 
 ```
-kaggle_pipeline/
-├── itviec/                     # Scraper package
-│   ├── client.py               # HTTP client (rate limit, retry, backoff)
-│   ├── parser.py               # BeautifulSoup HTML → Pydantic models
-│   ├── models.py               # Data contracts (Job, WorkingType, Label)
-│   ├── runner.py               # Orchestrator (sequential/parallel)
-│   ├── storage.py              # Atomic writes (CSV/JSON/Parquet)
-│   └── __main__.py             # Entry point
+/mnt/kaggle_data/
+├── itviec/                         # ITviec scraper
+│   ├── client.py
+│   ├── parser.py
+│   ├── models.py
+│   └── ...
 │
-├── dashboard/                  # Analytics
-│   ├── process_data.py         # Data cleaning + feature engineering
-│   └── build_dashboard.py      # Plotly dashboard generator
+├── topcv/                          # TopCV scraper (NEW)
+│   ├── scraper/
+│   │   ├── __init__.py
+│   │   └── topcv_scraper.py        # Playwright-based scraper
+│   ├── pipeline/
+│   │   ├── __init__.py
+│   │   ├── config.py               # Configuration
+│   │   └── daily_pipeline.py       # Daily orchestration
+│   ├── dashboard/
+│   │   └── app.py                  # Streamlit dashboard
+│   ├── data/
+│   │   └── raw/topcv/              # Scraped data
+│   ├── run_daily.sh                # Cron script
+│   └── requirements.txt
 │
-├── scripts/
-│   └── daily_pipeline.sh       # Cron automation script
-│
-├── data/                       # Local data snapshots
-│   └── itviec_v4/
-│       ├── itviec_jobs_latest.csv
-│       ├── itviec_jobs_latest.json
-│       └── itviec_jobs_latest.parquet
-│
-├── cli.py                      # CLI entry point (Typer)
-└── README.md
+└── logs/                           # Shared logs
+    ├── cron.log
+    └── topcv_pipeline.log
 ```
 
 ---
 
 ## 🚀 Quick Start
 
-### Local Development
+### TopCV Pipeline
 
 ```bash
-# Clone
-git clone <repo-url> && cd kaggle_pipeline
+# SSH to server
+ssh docutee@100.80.131.68
 
-# Install deps
-pip install typer requests beautifulsoup4 pydantic tenacity pandas plotly kaleido
+# Navigate to topcv pipeline
+cd /mnt/kaggle_data/topcv
 
-# Run full pipeline
+# Activate venv
+source .venv/bin/activate
+
+# Run scraper manually
+python pipeline/daily_pipeline.py
+
+# Run dashboard
+streamlit run dashboard/app.py --server.port 8501 --server.address 0.0.0.0 --server.headless true
+```
+
+### ITviec Pipeline
+
+```bash
+cd /mnt/kaggle_data/itviec
 python -m itviec --output data/itviec_v4 --workers 4
-python dashboard/process_data.py data/itviec_v4
-python dashboard/build_dashboard.py data/itviec_v4
-
-# Open dashboard
-open data/itviec_v4/itviec_dashboard.html
-```
-
-### One-Liner
-
-```bash
-python -m itviec -o data/itviec_v4 -w 4 && python dashboard/process_data.py data/itviec_v4 && python dashboard/build_dashboard.py data/itviec_v4 && open data/itviec_v4/itviec_dashboard.html
 ```
 
 ---
 
-## ⚙️ CLI Options
+## ⚙️ TopCV Scraper
 
-```bash
-python -m itviec [OPTIONS]
+### Features
+- ✅ Playwright-based (bypasses Cloudflare)
+- ✅ Paginated scraping
+- ✅ Daily cron automation
+- ✅ Streamlit dashboard
+- ✅ Kaggle integration (when configured)
 
-Options:
-  --output, -o PATH        Output directory (default: data/itviec)
-  --workers, -w INT        Parallel workers 1-16 (default: 1)
-  --max-pages INT          Cap pages for testing
-  --min-delay FLOAT        Min delay between requests in seconds (default: 0.8)
-  --max-delay FLOAT        Max delay between requests in seconds (default: 2.0)
-  --timeout INT            HTTP timeout in seconds (default: 30)
-  --no-csv                 Skip CSV output
-  --no-json                Skip JSON output
-  --parquet                Also write Parquet
-  --fail-threshold FLOAT   Max empty required field ratio (default: 0.5)
-  --verbose, -v            Debug logging
-```
+### Data Fields
 
----
-
-## 📈 Dashboard Features
-
-The generated dashboard includes **12 interactive Plotly charts** with glass morphism UI:
-
-| Section | Charts |
-|---------|--------|
-| **KPIs** | Total jobs, companies, cities, hot jobs, remote %, senior+ % |
-| **📍 Geographic** | Jobs by location, Working type × location |
-| **👤 Profile** | Seniority donut, Work mode, Job urgency, Job freshness |
-| **🛠️ Skills** | Top 20 skills, Skill categories, Skill co-occurrence heatmap |
-| **🏢 Companies** | Top 15 hiring companies, Seniority × location, Skills × seniority heatmap |
-
----
-
-## 🔄 Data Processing Pipeline
-
-### Step 1: Cleaning
-- Remove "Sign in to view salary" placeholders
-- Normalize locations (HCM, Ha Noi, Da Nang, multi-city)
-- Parse relative posted times → hours
-
-### Step 2: Feature Engineering
-- **Seniority extraction**: Intern → Manager+ from title patterns + YoE parsing
-- **Skill taxonomy**: Map 200+ raw tags into 9 categories (Languages, Frontend, Backend, Database, Cloud & DevOps, Data & AI, Mobile, Testing, Soft Skills)
-- **Quality checks**: Fail loudly if >50% of cards have missing required fields
-
-### Step 3: Storage
-- Atomic writes (temp file → rename) prevents corruption
-- Dedup by `job_key` or `url`
-- Snapshot per run + `*_latest.*` symlink
-
----
-
-## 🗺️ Skill Categories
-
-| Category | Tags | Example |
-|----------|------|---------|
-| **Languages** | Python, Java, JavaScript, TypeScript, Go, Rust | Core programming |
-| **Frontend** | React, Vue, Angular, Next.js, Tailwind | UI frameworks |
-| **Backend** | Node.js, Django, Spring Boot, .NET, FastAPI | Server-side |
-| **Database** | PostgreSQL, MongoDB, Redis, Elasticsearch | Data storage |
-| **Cloud & DevOps** | AWS, Azure, Docker, Kubernetes, CI/CD | Infrastructure |
-| **Data & AI** | ML, Spark, Kafka, NLP, LLM, GenAI | Data/ML stack |
-| **Mobile** | iOS, Android, Flutter, React Native | Mobile dev |
-| **Testing** | Selenium, Cypress, QA/QC, Automation | Quality assurance |
-| **Soft Skills** | Agile, Scrum, English, Project Management | Process/culture |
+| Field | Description |
+|-------|-------------|
+| `job_id` | Unique identifier |
+| `title` | Job title |
+| `company` | Company name |
+| `salary` | Salary range |
+| `location` | City/location |
+| `experience` | Required experience |
+| `level` | Job level |
+| `skills` | Required skills |
+| `posted_date` | When posted |
+| `url` | Job listing URL |
 
 ---
 
@@ -186,47 +143,102 @@ The generated dashboard includes **12 interactive Plotly charts** with glass mor
 | **IP** | `100.80.131.68` |
 | **OS** | Ubuntu 24.04 LTS |
 | **Spec** | 8GB RAM, 1TB disk |
-| **Data** | `/mnt/kaggle_data/itviec/` (783GB partition) |
 | **User** | `docutee` |
+| **Password** | `12032512` |
+
+### Directory Layout
+```
+/mnt/kaggle_data/           # Main data partition
+├── itviec/                 # ITviec pipeline
+├── topcv/                  # TopCV pipeline
+└── logs/                   # Shared logs
+```
 
 ### Cron Schedule
 ```bash
-# Runs daily at 7:00 AM (ICT)
-0 7 * * * /home/docutee/kaggle_pipeline/scripts/daily_pipeline.sh >> /mnt/kaggle_data/logs/cron.log 2>&1
+# TopCV: Daily at 6:00 AM
+0 6 * * * /mnt/kaggle_data/topcv/run_daily.sh >> /mnt/kaggle_data/logs/topcv_pipeline.log 2>&1
+
+# ITviec: Daily at 7:00 AM
+0 7 * * * /mnt/kaggle_data/itviec/scripts/daily_pipeline.sh >> /mnt/kaggle_data/logs/itviec_pipeline.log 2>&1
 ```
 
-### Manual Run
+### Streamlit Dashboard
+- **Status**: Running on port 8501
+- **URL**: http://100.80.131.68:8501
+- **Process**: `streamlit run dashboard/app.py --server.port 8501 --server.address 0.0.0.0`
+
+### Manual Commands
 ```bash
+# SSH
 ssh docutee@100.80.131.68
-bash ~/kaggle_pipeline/scripts/daily_pipeline.sh
-```
 
-### Logs
-```bash
-# Pipeline logs
-cat /mnt/kaggle_data/logs/pipeline_YYYY-MM-DD.log
+# Run TopCV scraper
+cd /mnt/kaggle_data/topcv && source .venv/bin/activate && python pipeline/daily_pipeline.py
 
-# Cron logs
-cat /mnt/kaggle_data/logs/cron.log
+# View logs
+tail -f /mnt/kaggle_data/logs/topcv_pipeline.log
+
+# Restart dashboard
+pkill -f streamlit
+cd /mnt/kaggle_data/topcv && source .venv/bin/activate && streamlit run dashboard/app.py --server.port 8501 --server.address 0.0.0.0 --server.headless true &
 ```
 
 ---
 
 ## 📦 Kaggle Dataset
 
+### ITviec Dataset
 | | |
 |---|---|
 | **URL** | [kaggle.com/datasets/quangcrawler/itviec-jobs](https://www.kaggle.com/datasets/quangcrawler/itviec-jobs) |
-| **Files** | `itviec_jobs.csv`, `itviec_jobs.json`, `processed_jobs.csv` |
-| **Update** | Daily at 7:00 AM (auto) |
-| **License** | CC0-1.0 |
+| **Update** | Daily at 7:00 AM |
 
-### Push Manually
+### TopCV Dataset
+| | |
+|---|---|
+| **URL** | [kaggle.com/datasets/docutee/topcv-it-jobs-vietnam](https://www.kaggle.com/datasets/docutee/topcv-it-jobs-vietnam) |
+| **Update** | Daily at 6:00 AM |
+| **Status** | ⚠️ Requires valid Kaggle API key |
+
+### Setup Kaggle API Key
 ```bash
-export KAGGLE_API_TOKEN="your-key"
-export KAGGLE_USERNAME="your-username"
-kaggle datasets create -p /mnt/kaggle_data/itviec/kaggle_upload --dir-mode zip
+# On server
+mkdir -p ~/.kaggle
+cat > ~/.kaggle/kaggle.json << 'EOF'
+{
+  "username": "docutee",
+  "key": "YOUR_KAGGLE_API_KEY"
+}
+EOF
+chmod 600 ~/.kaggle/kaggle.json
 ```
+
+---
+
+## 📋 Data Schema
+
+### TopCV Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `job_id` | string | TopCV job ID |
+| `url` | string | Job detail URL |
+| `title` | string | Job title |
+| `company` | string | Company name |
+| `company_url` | string | Company profile URL |
+| `salary` | string | Salary range |
+| `location` | string | City |
+| `experience` | string | Required experience |
+| `level` | string | Job level |
+| `job_type` | string | Employment type |
+| `category` | string | Job category |
+| `skills` | list | Required skills |
+| `posted_date` | string | When posted |
+| `deadline` | string | Application deadline |
+| `is_hot` | bool | Hot job badge |
+| `is_urgent` | bool | Urgent hiring |
+| `scrape_date` | string | Scrape date |
 
 ---
 
@@ -235,11 +247,10 @@ kaggle datasets create -p /mnt/kaggle_data/itviec/kaggle_upload --dir-mode zip
 | Principle | Implementation |
 |-----------|---------------|
 | **Respect robots.txt** | Verified allowed; polite rate limiting with jitter |
-| **Never retry 401/403** | Stop immediately on access denial |
+| **Cloudflare bypass** | Playwright browser automation |
 | **Atomic writes** | Temp file + `os.replace()` prevents corruption |
-| **Fail loudly** | `ParsingQualityError` when markup changes |
-| **Idempotent runs** | Dedup by job_key; re-runs overwrite same snapshot |
-| **Resumable** | Sequential processing; crash mid-run doesn't lose data |
+| **Idempotent runs** | Dedup by job_id; re-runs overwrite same snapshot |
+| **Error handling** | Retry with backoff, fail gracefully |
 
 ---
 
@@ -247,51 +258,11 @@ kaggle datasets create -p /mnt/kaggle_data/itviec/kaggle_upload --dir-mode zip
 
 | Issue | Solution |
 |-------|----------|
-| **0 jobs scraped** | Check `Accept-Encoding` — remove `br` if brotli not installed |
-| **Parse quality error** | Site markup changed — update CSS selectors in `parser.py` |
-| **403 Access denied** | itviec.com blocked access; may need to rotate User-Agent |
-| **429 Rate limited** | Increase `--min-delay` and `--max-delay` |
+| **Playwright not working** | `playwright install chromium` |
+| **0 jobs scraped** | Check if topcv.vn blocked; may need to update selectors |
 | **Kaggle auth failed** | Re-generate API key at kaggle.com/settings/api |
-| **Disk full** | Old data auto-cleaned after 30 days; check `/mnt/kaggle_data/logs` |
-
----
-
-## 📋 Data Schema
-
-<details>
-<summary>Click to expand full schema</summary>
-
-### Raw Fields
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `job_key` | string | Stable UUID from `data-job-key` |
-| `url` | string | Job detail URL |
-| `title` | string | Job title |
-| `company` | string | Company name |
-| `salary` | string | Salary (login-gated) |
-| `job_function` | string | Job category |
-| `working_type` | enum | Remote / Hybrid / At office |
-| `location` | string | City |
-| `tags` | list | Skill tags |
-| `posted_time` | string | Relative time |
-| `label` | enum | SUPER HOT / HOT / None |
-| `highlights` | list | Company highlights |
-| `page` | int | Listing page |
-| `scraped_at` | string | ISO-8601 timestamp |
-
-### Processed Fields
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `seniority` | enum | Intern → Manager+ |
-| `posted_hours_ago` | float | Hours since posted |
-| `skill_categories` | list | Mapped categories |
-| `location_clean` | string | Normalized city |
-| `num_tags` | int | Tag count |
-| `has_highlights` | bool | Has highlights |
-
-</details>
+| **Dashboard not accessible** | Check port 8501 is open; `ps aux | grep streamlit` |
+| **Disk full** | Old data auto-cleaned after 30 days |
 
 ---
 
@@ -303,7 +274,6 @@ MIT License — use freely, attribution appreciated.
 
 ## 🙏 Credits
 
-- Data source: [itviec.com](https://itviec.com) — Vietnam's #1 IT job board
-- Dashboard: [Plotly](https://plotly.com/python/) interactive charts
-- Scraping: [BeautifulSoup4](https://www.crummy.com/software/BeautifulSoup/) + [requests](https://docs.python-requests.com/)
-- Data contracts: [Pydantic](https://docs.pydantic.dev/)
+- Data sources: [itviec.com](https://itviec.com), [topcv.vn](https://topcv.vn)
+- Dashboard: [Streamlit](https://streamlit.io/), [Plotly](https://plotly.com/python/)
+- Scraping: [Playwright](https://playwright.dev/), [BeautifulSoup4](https://www.crummy.com/software/BeautifulSoup/)
