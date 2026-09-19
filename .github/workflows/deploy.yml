@@ -48,11 +48,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Join Tailscale (để SSH được IP tailnet)
-        # v2 vì còn hỗ trợ authkey; v3 bắt buộc OAuth client
-        uses: tailscale/github-action@v2
-        with:
-          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+      - name: Install Tailscale
+        run: curl -fsSL https://tailscale.com/install.sh | sh
+
+      - name: Join tailnet with authkey
+        env:
+          TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTHKEY }}
+        run: sudo tailscale up --authkey="$TS_AUTHKEY" --hostname=github-ci --accept-routes
 
       - name: Install deploy tools
         run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass rsync
