@@ -1,6 +1,6 @@
-"""ITviec source adapter — implement `BaseSource` đầy đủ 6 method.
+"""ITviec adapter — implement `BaseSource` đầy đủ 6 method.
 
-Bọc package `itviec/` (client + parser + models + runner) và map kết quả parse
+Bọc scraper của source (client + parser + models + scraper) và map kết quả parse
 sang schema chuẩn ở `pipeline/core/transform.py`.
 
 Không có logic pipeline riêng ở đây: scrape → rows → SnapshotStore (core),
@@ -87,8 +87,8 @@ class ItviecSource(BaseSource):
         timeout: int = 30,
         verbose: bool = False,
     ) -> ScrapeResult:
-        from itviec.client import AccessDeniedError, ItviecClient
-        from itviec.runner import ScrapeRunner
+        from .client import AccessDeniedError, ItviecClient
+        from .scraper import ScrapeRunner
 
         data_dir = Path(data_dir)
         prefix = settings.get_source(self.name).raw_prefix

@@ -1,1 +1,0 @@
-# TopCV Job Scraper Package

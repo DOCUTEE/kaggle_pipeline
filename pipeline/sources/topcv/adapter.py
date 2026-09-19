@@ -1,6 +1,6 @@
-"""TopCV source adapter — cùng `BaseSource` contract như itviec.
+"""TopCV adapter — cùng `BaseSource` contract như itviec.
 
-Bọc `scraper/topcv_scraper.py` (Playwright) và map `Job` dataclass sang schema
+Bọc scraper của source (Playwright: client + parser + models + scraper) và map `Job` sang schema
 chuẩn. Nhờ vậy TopCV có cùng feature engineering + cùng dashboard shell như
 itviec, chỉ khác danh sách chart (do dữ liệu có cột khác).
 """
@@ -88,14 +88,20 @@ class TopcvSource(BaseSource):
         timeout: int = 30,
         verbose: bool = False,
     ) -> ScrapeResult:
-        from scraper.topcv_scraper import TopCVScraper
+        from .scraper import TopCvScraper
 
         _ = (workers, timeout, verbose)  # chưa dùng, giữ để interface đồng nhất
         data_dir = Path(data_dir)
         prefix = settings.get_source(self.name).raw_prefix
 
-        scraper = TopCVScraper(headless=True)
-        jobs = scraper.scrape_all(max_pages=max_pages or 50)
+        scraper = TopCvScraper(headless=True)
+        stats, jobs = scraper.scrape_all(max_pages=max_pages or 50)
+
+        if stats.pages_failed:
+            logger.warning(
+                "TopCV incomplete: %d/%d pages failed: %s",
+                len(stats.pages_failed), stats.total_pages, stats.pages_failed,
+            )
         if not jobs:
             logger.warning("TopCV scraped 0 jobs")
             return ScrapeResult(source=self.name, count=0, raw_dir=data_dir)
@@ -114,7 +120,7 @@ class TopcvSource(BaseSource):
 
     @staticmethod
     def _to_row(job, scraped_at: str) -> dict:
-        """scraper.topcv_scraper.Job → row canonical (raw schema)."""
+        """pipeline.sources.topcv.models.Job → row canonical (raw schema)."""
         return {
             "job_id": job.job_id or job.url,
             "title": job.title,

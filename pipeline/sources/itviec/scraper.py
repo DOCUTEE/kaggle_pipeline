@@ -1,4 +1,4 @@
-"""Orchestration: fetch pages -> parse -> validate -> trả jobs.
+"""ITviec scraper — orchestration: fetch pages -> parse -> trả jobs.
 
 Runner giữ cho pipeline resumable: xử lý page theo thứ tự, gom kết quả, và
 retry các page lỗi ở lượt "repair" — nên crash giữa run không mất phần đã làm.
@@ -15,9 +15,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from itviec.client import ItviecClient
-from itviec.models import Job
-from itviec.parser import parse_page
+from .client import ItviecClient
+from .models import Job
+from .parser import parse_page
 
 logger = logging.getLogger(__name__)
 

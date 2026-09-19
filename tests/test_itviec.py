@@ -1,4 +1,4 @@
-"""Unit tests for the itviec scraper package (stdlib unittest).
+"""Unit tests cho source ITviec: model + parser + snapshot (stdlib unittest).
 
 Run:  python3 -m unittest discover -s tests -v
 """
@@ -15,11 +15,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from bs4 import BeautifulSoup  # noqa: E402
 
-from itviec.models import Job, JobLabel, WorkingType  # noqa: E402
-from itviec.parser import ParsingQualityError, parse_card, parse_page  # noqa: E402
+from pipeline.sources.itviec.models import Job, JobLabel, WorkingType  # noqa: E402
+from pipeline.sources.itviec.parser import (  # noqa: E402
+    ParsingQualityError,
+    parse_card,
+    parse_page,
+)
 
 from pipeline.core.snapshot import SnapshotStore, split_list  # noqa: E402
-from pipeline.sources.itviec import RAW_FIELDS, ItviecSource  # noqa: E402
+from pipeline.sources.itviec.adapter import RAW_FIELDS, ItviecSource  # noqa: E402
 
 
 CARD_HTML = """

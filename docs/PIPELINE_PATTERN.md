@@ -24,7 +24,8 @@ orchestration giống nhau, mà cả storage / transform / dashboard / db / publ
         (6 bước, KHÔNG có if source == ... — source-agnostic)
                                │
                                ▼
-                  pipeline/sources/<ten>.py   ← implement BaseSource
+            pipeline/sources/<ten>/adapter.py  ← implement BaseSource
+            (kèm scraper.py · client.py · parser.py · models.py)
                                │
        ┌───────────────────────┼────────────────────────┐
        ▼                       ▼                        ▼
@@ -68,11 +69,24 @@ Snapshot raw cũ (`job_key`/`tags`/`posted_time`) vẫn process được nhờ
 
 ## Thêm nguồn mới (vd `topdev`)
 
-1. Tạo `pipeline/sources/topdev.py` implement đủ 6 method của `BaseSource`
-   (xem `docs/PIPELINE_PATTERN` + `tests/test_runner.py::StubSource` làm mẫu).
-2. Đăng ký 1 dòng trong `pipeline/sources/__init__.py` + 1 entry trong `pipeline/settings.py::SOURCES`.
+1. Tạo package `pipeline/sources/topdev/` theo ĐÚNG pattern chung:
+
+   ```
+   pipeline/sources/topdev/
+   ├── __init__.py      # from ...adapter import TopdevSource; __all__ = [...]
+   ├── adapter.py       # implement đủ 6 method của BaseSource
+   ├── scraper.py       # phân trang + retry + dedup → trả (stats, jobs)
+   ├── client.py        # I/O tới site
+   ├── parser.py        # HTML → models
+   └── models.py        # data model
+   ```
+
+   (xem `tests/test_runner.py::StubSource` làm mẫu tối giản)
+2. Đăng ký 1 dòng trong `pipeline/sources/__init__.py`
+   (`from pipeline.sources.topdev import TopdevSource`) + 1 entry trong
+   `pipeline/settings.py::SOURCES`.
 3. Xong — CLI/DAG/dashboard/db tự nhận source mới.
-   `tests/test_sources.py` sẽ fail nếu thiếu bước nào.
+   `tests/test_sources.py` fail nếu thiếu file/bước nào (có test chốt shape của package).
 
 ## Vận hành chuẩn (Airflow)
 

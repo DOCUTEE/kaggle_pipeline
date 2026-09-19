@@ -9,7 +9,7 @@ REPO=/mnt/kaggle_data/kaggle_pipeline
 say() { echo "[$(date '+%H:%M:%S')] $*" | tee -a "$LOG"; }
 
 say "1/6 perms..."
-chmod -R a+rX "$REPO/dags" "$REPO/pipeline" "$REPO/scraper" "$REPO/itviec" "$REPO/infra" 2>>"$LOG"
+chmod -R a+rX "$REPO/dags" "$REPO/pipeline" "$REPO/infra" 2>>"$LOG"
 chmod -R a+rwX "$REPO/data" 2>>"$LOG"
 say "perms done"
 

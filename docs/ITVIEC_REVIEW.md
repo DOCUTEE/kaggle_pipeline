@@ -4,8 +4,9 @@ Ngày: 2026-09-14
 Phạm vi: `itviec_scraper.py` (322 dòng) — scraper 1 file, lưu CSV/JSON.
 
 > **Lưu trữ lịch sử (2026-09-20):** `itviec_scraper.py` đã bị xoá. Các khuyến nghị
-> trong review này đã được hiện thực ở package `itviec/` (client/parser/storage/runner)
-> + adapter `pipeline/sources/itviec.py`. Giữ file này làm ghi chép thiết kế.
+> trong review này đã được hiện thực ở package `pipeline/sources/itviec/`
+> (models/parser/client/scraper) + adapter `pipeline/sources/itviec/adapter.py`.
+> Giữ file này làm ghi chép thiết kế.
 
 ## Tóm tắt (Executive Summary)
 

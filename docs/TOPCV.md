@@ -3,17 +3,21 @@
 ## Overview
 Scrapes IT job listings from topcv.vn using Playwright to bypass Cloudflare protection.
 
-Adapter: `pipeline/sources/topcv.py` (bọc `scraper/topcv_scraper.py` theo `BaseSource`).
+Source package: `pipeline/sources/topcv/` — cùng pattern với itviec:
+`adapter.py` (6 bước) · `scraper.py` (phân trang/retry) · `client.py` (Playwright)
+· `parser.py` (HTML → Job) · `models.py` (Job dataclass).
 
 ## Files
 
 ```
-scraper/
-└── topcv_scraper.py            # Main scraper (Playwright)
-pipeline/
-├── sources/topcv.py            # Adapter cho runner
-└── settings.py                 # Config (SOURCES["topcv"])
-data/raw/topcv/                 # Output data (mặc định): raw JSON + dashboard/processed_jobs.json
+pipeline/sources/topcv/
+├── adapter.py                  # implement BaseSource (6 bước)
+├── scraper.py                  # phân trang + delay + retry + dedup
+├── client.py                   # Playwright: browser, chờ Cloudflare, lấy HTML
+├── parser.py                   # HTML → Job (test offline được)
+└── models.py                   # Job dataclass
+pipeline/settings.py            # config: SOURCES["topcv"]
+data/raw/topcv/                 # output: raw JSON + dashboard/processed_jobs.json
 ```
 
 > Schedule duy nhất là Airflow DAG `jobs_daily` (không dùng cron).

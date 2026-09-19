@@ -1,7 +1,7 @@
 """Unified runner — 1 PATTERN duy nhất cho mọi source.
 
 Mỗi source chạy đúng 6 bước giống nhau, và runner **không có nhánh nào theo
-tên source**: mọi khác biệt nằm trong adapter (`pipeline/sources/<ten>.py`).
+tên source**: mọi khác biệt nằm trong package `pipeline/sources/<ten>/`.
 
     1. scrape      (adapter.scrape)
     2. process     (adapter.process)      — schema chuẩn ở core/transform

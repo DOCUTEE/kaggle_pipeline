@@ -100,8 +100,39 @@ class TestSourceContract(unittest.TestCase):
     def test_adapters_do_not_import_each_other(self):
         for name in ALL_SOURCES:
             other = "topcv" if name == "itviec" else "itviec"
-            src = (REPO_ROOT / "pipeline" / "sources" / f"{name}.py").read_text(encoding="utf-8")
-            self.assertNotIn(f"sources.{other}", src, f"{name}.py import adapter của {other}")
+            src = self._adapter_src(name)
+            self.assertNotIn(f"sources.{other}", src, f"{name}/adapter.py import adapter của {other}")
+
+    def test_source_packages_have_same_shape(self):
+        """Mỗi source = 1 package cùng tên file, cùng tầng — không lệch chỗ này chỗ kia."""
+        expected = {"__init__.py", "adapter.py", "client.py", "models.py", "parser.py", "scraper.py"}
+        for name in ALL_SOURCES:
+            files = {p.name for p in (REPO_ROOT / "pipeline" / "sources" / name).glob("*.py")}
+            self.assertEqual(files, expected, f"{name}/ thiếu/thừa file so với pattern chung")
+
+    def test_registry_imports_from_packages_not_loose_modules(self):
+        registry = (REPO_ROOT / "pipeline" / "sources" / "__init__.py").read_text(encoding="utf-8")
+        for name in ALL_SOURCES:
+            self.assertIn(f"from pipeline.sources.{name} import", registry)
+
+    def test_no_scraper_code_left_at_repo_root(self):
+        for legacy in ("itviec", "scraper"):
+            self.assertFalse(
+                (REPO_ROOT / legacy).exists(),
+                f"{legacy}/ vẫn còn ở root — code scraper phải nằm trong pipeline/sources/",
+            )
+
+    def test_sources_are_isolated_from_each_other(self):
+        """Source này không được import module của source kia (chỉ core dùng chung)."""
+        for name in ALL_SOURCES:
+            other = "topcv" if name == "itviec" else "itviec"
+            for path in (REPO_ROOT / "pipeline" / "sources" / name).glob("*.py"):
+                src = path.read_text(encoding="utf-8")
+                self.assertNotIn(f"sources.{other}.", src, f"{path.name} import {other}")
+
+    @staticmethod
+    def _adapter_src(name: str) -> str:
+        return (REPO_ROOT / "pipeline" / "sources" / name / "adapter.py").read_text(encoding="utf-8")
 
 
 if __name__ == "__main__":

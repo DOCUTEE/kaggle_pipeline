@@ -1,7 +1,7 @@
 """Data contracts dùng chung — 1 pattern cho mọi source.
 
 `pipeline/runner.py` chỉ biết các kiểu này, không biết gì về itviec/topcv.
-Source adapter (pipeline/sources/<ten>.py) chịu trách nhiệm implement
+Source adapter (pipeline/sources/<ten>/adapter.py) chịu trách nhiệm implement
 `BaseSource` và trả về đúng các kiểu ở đây.
 """
 

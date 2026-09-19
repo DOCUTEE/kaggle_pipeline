@@ -66,8 +66,9 @@ kaggle_pipeline/
 │   │   └── publish.py              #     staging + push Kaggle
 │   └── sources/                    #   adapter: base.py (contract), itviec.py, topcv.py
 │
-├── itviec/                         # ITviec scraper package (requests + BS4)
-├── scraper/topcv_scraper.py        # TopCV scraper (Playwright, bypass Cloudflare)
+├── sources/ (trong pipeline/)       # mỗi source 1 package, cùng tên file, cùng tầng
+│   ├── itviec/  adapter · client · models · parser · scraper    (requests + BS4)
+│   └── topcv/   adapter · client · models · parser · scraper    (Playwright)
 │
 ├── dags/jobs_daily.py              # Airflow DAG — scheduler DUY NHẤT (00:00 UTC)
 ├── infra/                          # docker compose: postgres + grafana + airflow
@@ -77,7 +78,8 @@ kaggle_pipeline/
 └── data/                           # raw JSON snapshot + processed_jobs.json (<source>/...)
 ```
 
-> Mỗi source chỉ khai báo `pipeline/sources/<ten>.py` (6 method); storage,
+> Mỗi source là 1 package `pipeline/sources/<ten>/` cùng tên file, cùng tầng;
+> storage,
 > transform, dashboard, db, publish đều dùng chung ở `pipeline/core/`.
 > Chi tiết: `docs/PIPELINE_PATTERN.md`.
 
@@ -289,7 +291,7 @@ chmod 600 ~/.kaggle/kaggle.json
 
 | Principle | Implementation |
 |-----------|---------------|
-| **One pattern per source** | Mỗi source chỉ implement 6 method trong `pipeline/sources/<ten>.py`; storage/transform/dashboard/db/publish dùng chung ở `pipeline/core/`. Runner không có `if source == ...` |
+| **One pattern per source** | Mỗi source là 1 package `pipeline/sources/<ten>/` (`adapter/scraper/client/parser/models.py`) implement 6 method; storage/transform/dashboard/db/publish dùng chung ở `pipeline/core/`. Runner không có `if source == ...` |
 | **Conformed schema** | Cả 2 nguồn ra `processed_jobs.json` cùng cột core (`job_id, title, company, salary, location_clean, skills, seniority, posted_hours_ago, skill_categories, ...`) → join/so sánh chéo được |
 | **Respect robots.txt** | Verified allowed; polite rate limiting with jitter |
 | **Cloudflare bypass** | Playwright browser automation |

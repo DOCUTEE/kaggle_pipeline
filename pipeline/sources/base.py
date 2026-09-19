@@ -12,8 +12,9 @@ MỘT pattern duy nhất: mỗi source implement đủ 6 method dưới đây, v
     staging_files()    → map file cần publish lên Kaggle
 
 Thêm nguồn mới:
-    1. Tạo class implement BaseSource trong `pipeline/sources/<ten>.py`
-    2. Đăng ký 1 dòng trong `pipeline/sources/__init__.py`
+    1. Tạo package `pipeline/sources/<ten>/` với `adapter.py` implement BaseSource
+       (+ scraper.py, client.py, parser.py, models.py theo pattern chung)
+    2. Export class ở `pipeline/sources/<ten>/__init__.py` + đăng ký 1 dòng trong `pipeline/sources/__init__.py`
     3. Thêm 1 entry trong `pipeline/settings.py::SOURCES`
 Không sửa runner, CLI, DAG, shell.
 """

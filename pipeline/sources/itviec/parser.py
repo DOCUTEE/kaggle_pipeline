@@ -14,7 +14,7 @@ from typing import Iterable
 
 from bs4 import BeautifulSoup, Tag
 
-from itviec.models import Job, JobLabel, WorkingType
+from .models import Job, JobLabel, WorkingType
 
 logger = logging.getLogger(__name__)
 
