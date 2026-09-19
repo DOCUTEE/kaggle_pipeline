@@ -2,18 +2,18 @@
 """
 TopCV Job Scraper
 Scrapes IT/Công nghệ thông tin jobs from topcv.vn using Playwright (Cloudflare bypass).
+
+Chỉ làm 1 việc: scrape → trả `list[Job]`. Việc ghi file/process/publish do
+pipeline lo (`pipeline/sources/topcv.py` + `pipeline/core/`).
+Chạy: `python -m pipeline run topcv`.
 """
 
-import json
-import csv
 import time
 import random
 import re
-import os
 from datetime import datetime
-from pathlib import Path
 from typing import Optional
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, field
 
 from playwright.sync_api import sync_playwright, Page, Browser
 from bs4 import BeautifulSoup
@@ -21,7 +21,6 @@ from bs4 import BeautifulSoup
 
 BASE_URL = "https://www.topcv.vn"
 SEARCH_URL = "https://www.topcv.vn/tim-viec-lam-cong-nghe-thong-tin-cr257"
-OUTPUT_DIR = Path("data/raw/topcv")
 
 # Default query params
 DEFAULT_PARAMS = {
@@ -44,7 +43,7 @@ class Job:
     level: str = ""
     job_type: str = ""
     category: str = ""
-    skills: list = None
+    skills: list = field(default_factory=list)
     posted_date: str = ""
     deadline: str = ""
     is_hot: bool = False
@@ -52,8 +51,6 @@ class Job:
     scrape_date: str = ""
 
     def __post_init__(self):
-        if self.skills is None:
-            self.skills = []
         if not self.scrape_date:
             self.scrape_date = datetime.now().strftime("%Y-%m-%d")
 
@@ -332,79 +329,3 @@ class TopCVScraper:
 
         finally:
             self.stop_browser()
-
-
-def save_results(jobs: list[Job], output_dir: Path = OUTPUT_DIR):
-    """Save scraped jobs to CSV and JSON files."""
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    today = datetime.now().strftime("%Y-%m-%d")
-
-    # Convert to dicts
-    job_dicts = [asdict(j) for j in jobs]
-
-    # Save JSON (timestamped)
-    json_path = output_dir / f"topcv_jobs_{timestamp}.json"
-    with open(json_path, "w", encoding="utf-8") as f:
-        json.dump(
-            {
-                "source": "topcv.vn",
-                "category": "Cong nghe thong tin",
-                "scraped_at": datetime.now().isoformat(),
-                "total_jobs": len(jobs),
-                "jobs": job_dicts,
-            },
-            f,
-            ensure_ascii=False,
-            indent=2,
-        )
-    print(f"Saved JSON: {json_path}")
-
-    # Save CSV (timestamped)
-    csv_path = output_dir / f"topcv_jobs_{timestamp}.csv"
-    if job_dicts:
-        fieldnames = [
-            "job_id", "title", "url", "company", "company_url",
-            "salary", "location", "experience", "level", "job_type",
-            "category", "skills", "posted_date", "deadline",
-            "is_hot", "is_urgent", "scrape_date",
-        ]
-        with open(csv_path, "w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
-            writer.writeheader()
-            for job in job_dicts:
-                row = {**job}
-                row["skills"] = " | ".join(row.get("skills", []))
-                writer.writerow(row)
-        print(f"Saved CSV: {csv_path}")
-
-    # Save latest copies
-    import shutil
-    latest_json = output_dir / "topcv_jobs_latest.json"
-    latest_csv = output_dir / "topcv_jobs_latest.csv"
-    shutil.copy2(json_path, latest_json)
-    shutil.copy2(csv_path, latest_csv)
-    print(f"Updated latest: {latest_json}, {latest_csv}")
-
-    return json_path, csv_path
-
-
-if __name__ == "__main__":
-    print(f"Starting TopCV scraper at {datetime.now().isoformat()}")
-
-    scraper = TopCVScraper(headless=True)
-    jobs = scraper.scrape_all(max_pages=10)
-
-    if jobs:
-        save_results(jobs)
-
-        # Quick stats
-        companies = set(j.company for j in jobs if j.company)
-        locations = set(j.location for j in jobs if j.location)
-        print(f"\nStats:")
-        print(f"  Total jobs: {len(jobs)}")
-        print(f"  Companies: {len(companies)}")
-        print(f"  Locations: {locations}")
-    else:
-        print("No jobs scraped!")

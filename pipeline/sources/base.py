@@ -1,32 +1,29 @@
-"""Plugin interface cho mọi nguồn job (itviec, topcv, ...).
+"""Plugin contract cho mọi nguồn job (itviec, topcv, ...).
 
-PATTERN THỐNG NHẤT:
-    scrape()  -> lưu raw (csv/json latest) -> trả ScrapeResult
-    process/dashboard/load-db/kaggle/cleanup  -> dùng chung trong pipeline/runner.py
+MỘT pattern duy nhất: mỗi source implement đủ 6 method dưới đây, và
+`pipeline/runner.py` gọi chúng theo đúng thứ tự 6 bước — runner không có
+`if source == ...` nào cả.
 
-Thêm nguồn mới chỉ cần:
-    1. Tạo class implement BaseSource trong pipeline/sources/<ten>.py
-    2. Đăng ký vào pipeline/sources/__init__.py REGISTRY
+    scrape()          → ghi raw snapshot (JSON), trả ScrapeResult
+    process()         → raw → processed JSON theo schema chuẩn, trả ProcessResult
+    dashboard()        → processed CSV → HTML
+    load_db()          → processed CSV → Postgres (theo db_spec())
+    db_spec()          → khai báo bảng/cột cho loader generic
+    staging_files()    → map file cần publish lên Kaggle
+
+Thêm nguồn mới:
+    1. Tạo class implement BaseSource trong `pipeline/sources/<ten>.py`
+    2. Đăng ký 1 dòng trong `pipeline/sources/__init__.py`
+    3. Thêm 1 entry trong `pipeline/settings.py::SOURCES`
 Không sửa runner, CLI, DAG, shell.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
-
-@dataclass
-class ScrapeResult:
-    """Kết quả chuẩn của bước scrape, mọi source đều trả về kiểu này."""
-
-    source: str
-    count: int = 0
-    raw_dir: Path | None = None
-    latest_csv: Path | None = None
-    latest_json: Path | None = None
-    extra: dict = field(default_factory=dict)
+from pipeline.core.contracts import DbSpec, ProcessResult, ScrapeResult
 
 
 class BaseSource(Protocol):
@@ -43,5 +40,28 @@ class BaseSource(Protocol):
         timeout: int = 30,
         verbose: bool = False,
     ) -> ScrapeResult:
-        """Scrape toàn bộ listings của source vào data_dir. Idempotent ở mức file."""
+        """Bước 1 — scrape listings và ghi raw snapshot vào data_dir."""
         ...
+
+    def process(self, data_dir: Path, out_dir: Path) -> ProcessResult:
+        """Bước 2 — raw snapshot → processed JSON (schema chuẩn ở core/transform)."""
+        ...
+
+    def dashboard(self, processed: ProcessResult, out_dir: Path) -> Path:
+        """Bước 3 — processed JSON → dashboard HTML."""
+        ...
+
+    def load_db(self, processed: ProcessResult) -> int:
+        """Bước 4 (optional) — nạp processed JSON vào Postgres."""
+        ...
+
+    def db_spec(self) -> DbSpec:
+        """Khai báo bảng/cột Postgres cho loader dùng chung."""
+        ...
+
+    def staging_files(self, data_dir: Path, dashboard_dir: Path) -> dict[Path, str]:
+        """Bước 5 — file cần publish lên Kaggle (nguồn → tên file đích)."""
+        ...
+
+
+__all__ = ["BaseSource"]

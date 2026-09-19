@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""Load processed job data into PostgreSQL for Grafana dashboards.
+"""Loader PostgreSQL — 1 implementation duy nhất cho mọi source.
 
-Usage:
-    python -m pipeline.db load itviec --csv data/itviec_v4/dashboard/processed_jobs.csv
-    python -m pipeline.db load topcv --csv data/raw/topcv/processed_topcv.csv
-    python -m pipeline.db load itviec --data-dir data/itviec_v4  (auto-finds processed_jobs.csv)
-    python -m pipeline.db status
+Trước đây mỗi source có 1 hàm load copy-paste. Nay source khai báo `DbSpec`
+(bảng, cột, khoá conflict, cột JSON/bool) và loader này làm phần còn lại.
+
+Nguồn dữ liệu là processed JSON (`ProcessResult.json_path`); đây cũng là
+đường tiêu thụ chính thức — phân tích/dashboard query thẳng Postgres.
+
+Không có CLI riêng: gọi từ runner qua `adapter.load_db()`
+(`python -m pipeline run <source> --load-db`).
 """
 
 from __future__ import annotations
@@ -14,8 +17,13 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
+
+from pipeline.core.contracts import DbSpec
+from pipeline.core.transform import load_processed_df
+from pipeline.core.snapshot import split_list
 
 # ─── CONFIG ───────────────────────────────────────────────────────────────────
 
@@ -42,225 +50,101 @@ def _get_conn():
         sys.exit(1)
 
 
-# ─── ITVIEC LOADER ────────────────────────────────────────────────────────────
+# ─── VALUE COERCION ───────────────────────────────────────────────────────────
 
-def _to_json(val) -> str | None:
-    """Convert a value to proper JSON string for PostgreSQL JSONB."""
-    if val is None or (isinstance(val, float) and pd.isna(val)):
-        return None
-    if isinstance(val, list):
-        return json.dumps(val)
-    if isinstance(val, str):
-        val = val.strip()
-        if not val or val == "[]":
-            return "[]"
-        # CSV stores Python repr: ['Python', 'Java'] → convert to JSON: ["Python", "Java"]
-        try:
-            import ast
-            parsed = ast.literal_eval(val)
-            if isinstance(parsed, (list, dict)):
-                return json.dumps(parsed, ensure_ascii=False)
-        except (ValueError, SyntaxError):
-            pass
-        return val
-    return json.dumps(val)
-
-def load_itviec_csv(csv_path: Path) -> int:
-    """Load processed iTViec CSV into PostgreSQL. Returns rows inserted."""
-    print(f"\n[db] Loading iTViec data from {csv_path}")
-    df = pd.read_csv(csv_path)
-
-    # Convert list columns from string repr to proper JSON
-    for col in ("tags", "skill_categories", "highlights"):
-        if col in df.columns:
-            df[col] = df[col].apply(_to_json)
-
-    conn = _get_conn()
-    cur = conn.cursor()
-
-    inserted = 0
-    for _, row in df.iterrows():
-        try:
-            cur.execute("""
-                INSERT INTO itviec_jobs (
-                    title, company, location, location_clean, salary,
-                    working_type, job_function, seniority, label, label_clean,
-                    posted_time, posted_hours_ago, url, tags, highlights,
-                    skill_categories, num_tags, has_highlights, scraped_at
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (url) DO UPDATE SET
-                    title = EXCLUDED.title,
-                    company = EXCLUDED.company,
-                    salary = EXCLUDED.salary,
-                    seniority = EXCLUDED.seniority,
-                    label = EXCLUDED.label,
-                    tags = EXCLUDED.tags,
-                    scraped_at = EXCLUDED.scraped_at,
-                    loaded_at = NOW()
-            """, (
-                row.get("title"),
-                row.get("company"),
-                row.get("location"),
-                row.get("location_clean"),
-                row.get("salary"),
-                row.get("working_type"),
-                row.get("job_function"),
-                row.get("seniority"),
-                row.get("label"),
-                row.get("label_clean"),
-                row.get("posted_time"),
-                row.get("posted_hours_ago"),
-                row.get("url"),
-                row.get("tags"),
-                row.get("highlights"),
-                row.get("skill_categories"),
-                row.get("num_tags"),
-                row.get("has_highlights"),
-                row.get("scraped_at"),
-            ))
-            inserted += 1
-        except Exception as e:
-            conn.rollback()
-            print(f"  [WARN] Failed row: {e}")
-            conn = _get_conn()
-            cur = conn.cursor()
-
-    conn.commit()
-    cur.close()
-    conn.close()
-
-    print(f"  → Loaded {inserted}/{len(df)} rows into itviec_jobs")
-    return inserted
-
-
-# ─── TOPCV LOADER ─────────────────────────────────────────────────────────────
-
-def load_topcv_csv(csv_path: Path) -> int:
-    """Load TopCV CSV into PostgreSQL. Returns rows inserted."""
-    print(f"\n[db] Loading TopCV data from {csv_path}")
-    df = pd.read_csv(csv_path)
-
-    conn = _get_conn()
-    cur = conn.cursor()
-
-    inserted = 0
-    for _, row in df.iterrows():
-        try:
-            cur.execute("""
-                INSERT INTO topcv_jobs (
-                    job_id, title, company, salary, location,
-                    experience, level, skills, url, is_hot,
-                    posted_date, scrape_date
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (job_id) DO UPDATE SET
-                    title = EXCLUDED.title,
-                    salary = EXCLUDED.salary,
-                    skills = EXCLUDED.skills,
-                    scrape_date = EXCLUDED.scrape_date
-            """, (
-                str(row.get("job_id", "")),
-                row.get("title"),
-                row.get("company"),
-                row.get("salary"),
-                row.get("location"),
-                row.get("experience"),
-                row.get("level"),
-                row.get("skills"),
-                row.get("url"),
-                bool(row.get("is_hot", False)),
-                row.get("posted_date"),
-                row.get("scrape_date"),
-            ))
-            inserted += 1
-        except Exception as e:
-            conn.rollback()
-            print(f"  [WARN] Failed row: {e}")
-            conn = _get_conn()
-            cur = conn.cursor()
-
-    conn.commit()
-    cur.close()
-    conn.close()
-
-    print(f"  → Loaded {inserted}/{len(df)} rows into topcv_jobs")
-    return inserted
-
-
-# ─── STATUS ───────────────────────────────────────────────────────────────────
-
-def status():
-    """Print database status."""
-    conn = _get_conn()
-    cur = conn.cursor()
-
-    print("\n=== Database Status ===")
-
+def _is_missing(value: Any) -> bool:
+    if value is None:
+        return True
     try:
-        cur.execute("SELECT COUNT(*) FROM itviec_jobs")
-        itviec_count = cur.fetchone()[0]
-        print(f"  iTViec jobs:  {itviec_count:>6}")
+        return bool(pd.isna(value))
+    except (TypeError, ValueError):
+        return False
 
-        cur.execute("SELECT COUNT(*) FROM topcv_jobs")
-        topcv_count = cur.fetchone()[0]
-        print(f"  TopCV jobs:   {topcv_count:>6}")
 
-        cur.execute("SELECT COUNT(DISTINCT company) FROM itviec_jobs")
-        companies = cur.fetchone()[0]
-        print(f"  Companies:    {companies:>6}")
+def _scalar(value: Any) -> Any:
+    """NaN/None → NULL cho Postgres."""
+    return None if _is_missing(value) else value
 
-        cur.execute("SELECT MAX(scraped_at) FROM itviec_jobs")
-        last_scrape = cur.fetchone()[0]
-        print(f"  Last scrape:  {last_scrape}")
 
-        cur.execute("SELECT location_clean, COUNT(*) as cnt FROM itviec_jobs GROUP BY location_clean ORDER BY cnt DESC LIMIT 5")
-        print("\n  Top locations:")
-        for loc, cnt in cur.fetchall():
-            print(f"    {loc or 'Unknown':20s} {cnt:>5}")
+def _json_value(value: Any) -> str:
+    """Cột list → JSON array cho JSONB (nhận cả list thật lẫn chuỗi CSV cũ)."""
+    return json.dumps(split_list(value), ensure_ascii=False)
 
-    except Exception as e:
-        print(f"  [ERROR] {e}")
 
+def _bool_value(value: Any) -> bool:
+    if _is_missing(value):
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return str(value).strip().lower() in ("true", "1", "yes", "y", "t")
+
+
+def _text_value(value: Any) -> str:
+    return "" if _is_missing(value) else str(value)
+
+
+def coerce_row(row: pd.Series, spec: DbSpec) -> tuple:
+    """Lấy giá trị theo `spec.columns` (db_column → cột processed JSON) và ép kiểu."""
+    values = []
+    for db_col, csv_col in spec.columns.items():
+        raw = row.get(csv_col)
+        if db_col in spec.json_columns:
+            values.append(_json_value(raw))
+        elif db_col in spec.bool_columns:
+            values.append(_bool_value(raw))
+        elif db_col in spec.text_columns:
+            values.append(_text_value(raw))
+        else:
+            values.append(_scalar(raw))
+    return tuple(values)
+
+
+def build_insert_sql(spec: DbSpec) -> str:
+    """Sinh câu INSERT ... ON CONFLICT ... DO UPDATE từ DbSpec."""
+    cols = list(spec.columns)
+    placeholders = ", ".join(["%s"] * len(cols))
+    updates = ", ".join(f"{col} = EXCLUDED.{col}" for col in spec.update_columns)
+    updates = f"{updates}, loaded_at = NOW()" if updates else "loaded_at = NOW()"
+    return (
+        f"INSERT INTO {spec.table} ({', '.join(cols)}) VALUES ({placeholders}) "
+        f"ON CONFLICT ({spec.conflict_key}) DO UPDATE SET {updates}"
+    )
+
+
+# ─── LOADER ───────────────────────────────────────────────────────────────────
+
+def load_processed(json_path: Path, spec: DbSpec) -> int:
+    """Nạp processed JSON vào Postgres theo `spec`. Trả số row đã insert/update."""
+    json_path = Path(json_path)
+    if not json_path.exists():
+        raise FileNotFoundError(f"Processed JSON not found: {json_path}")
+
+    print(f"\n[db] Loading {json_path} → {spec.table}")
+    df = load_processed_df(json_path)
+
+    sql = build_insert_sql(spec)
+    conn = _get_conn()
+    cur = conn.cursor()
+
+    inserted = 0
+    for _, row in df.iterrows():
+        try:
+            cur.execute(sql, coerce_row(row, spec))
+            inserted += 1
+        except Exception as e:  # noqa: BLE001 — 1 row lỗi không chặn cả batch
+            conn.rollback()
+            print(f"  [WARN] Failed row: {e}")
+            conn = _get_conn()
+            cur = conn.cursor()
+
+    conn.commit()
     cur.close()
     conn.close()
 
-
-# ─── CLI ──────────────────────────────────────────────────────────────────────
-
-def main():
-    import argparse
-
-    parser = argparse.ArgumentParser(prog="pipeline.db", description="Load job data into PostgreSQL")
-    sub = parser.add_subparsers(dest="command", required=True)
-
-    # load
-    p_load = sub.add_parser("load", help="Load CSV into database")
-    p_load.add_argument("source", choices=["itviec", "topcv"], help="Data source")
-    p_load.add_argument("--csv", type=Path, help="Path to CSV file")
-    p_load.add_argument("--data-dir", type=Path, help="Data directory (auto-finds CSV)")
-
-    # status
-    sub.add_parser("status", help="Show database status")
-
-    args = parser.parse_args()
-
-    if args.command == "status":
-        status()
-    elif args.command == "load":
-        csv_path = args.csv
-        if not csv_path and args.data_dir:
-            if args.source == "itviec":
-                csv_path = args.data_dir / "processed_jobs.csv"
-            else:
-                csv_path = args.data_dir / "processed_topcv.csv"
-        if not csv_path or not csv_path.exists():
-            print(f"[ERROR] CSV not found. Provide --csv or --data-dir")
-            sys.exit(1)
-
-        if args.source == "itviec":
-            load_itviec_csv(csv_path)
-        else:
-            load_topcv_csv(csv_path)
+    print(f"  → Loaded {inserted}/{len(df)} rows into {spec.table}")
+    return inserted
 
 
-if __name__ == "__main__":
-    main()
+__all__ = ["DB_CONFIG", "build_insert_sql", "coerce_row", "load_processed"]

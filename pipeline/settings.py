@@ -47,6 +47,9 @@ class SourceSettings:
     schedule: str                   # document lịch Airflow (DAG là source of truth)
     default_max_pages: int | None   # None = toàn bộ
     default_workers: int = 4
+    raw_prefix: str = ""            # tiền tố file raw: <prefix>_latest.json
+    dashboard_html: str = "dashboard.html"
+    processed_json: str = "processed_jobs.json"
 
 
 SOURCES: dict[str, SourceSettings] = {
@@ -57,6 +60,8 @@ SOURCES: dict[str, SourceSettings] = {
         schedule="0 0 * * *",           # document theo DAG jobs_daily (07:00 ICT daily)
         default_max_pages=None,     # scrape toàn bộ
         default_workers=4,
+        raw_prefix="itviec_jobs",
+        dashboard_html="itviec_dashboard.html",
     ),
     "topcv": SourceSettings(
         name="topcv",
@@ -67,6 +72,8 @@ SOURCES: dict[str, SourceSettings] = {
         schedule="0 0 * * *",           # document theo DAG jobs_daily (07:00 ICT daily)
         default_max_pages=50,
         default_workers=1,          # Playwright chạy tuần tự
+        raw_prefix="topcv_jobs",
+        dashboard_html="topcv_dashboard.html",
     ),
 }
 

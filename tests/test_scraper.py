@@ -17,7 +17,9 @@ from bs4 import BeautifulSoup  # noqa: E402
 
 from itviec.models import Job, JobLabel, WorkingType  # noqa: E402
 from itviec.parser import ParsingQualityError, parse_card, parse_page  # noqa: E402
-from itviec.storage import CSV_FIELDS, JobStore, _to_csv_row  # noqa: E402
+
+from pipeline.core.snapshot import SnapshotStore, split_list  # noqa: E402
+from pipeline.sources.itviec import RAW_FIELDS, ItviecSource  # noqa: E402
 
 
 CARD_HTML = """
@@ -140,6 +142,8 @@ class TestModels(unittest.TestCase):
 
 
 class TestStorage(unittest.TestCase):
+    """Raw snapshot giờ dùng SnapshotStore dùng chung (pipeline/core/snapshot.py)."""
+
     def _make_job(self, key: str, title: str = "Title") -> Job:
         return Job(
             job_key=key,
@@ -151,43 +155,71 @@ class TestStorage(unittest.TestCase):
             scraped_at="2026-09-14T00:00:00+00:00",
         )
 
-    def test_csv_row_serialization(self):
+    def _store(self, td: str) -> SnapshotStore:
+        return SnapshotStore(Path(td), "itviec_jobs", key_field="job_id", source="itviec")
+
+    def test_row_serialization(self):
         job = self._make_job("k1", "Data Engineer")
         job.tags = ["Python", "SQL"]
         job.working_type = WorkingType.OFFICE
         job.label = JobLabel.HOT
-        row = _to_csv_row(job)
-        self.assertEqual(row["tags"], "Python | SQL")
+        row = ItviecSource._to_row(job)
+        self.assertEqual(row["job_id"], "k1")
+        self.assertEqual(row["skills"], ["Python", "SQL"])
         self.assertEqual(row["working_type"], "At office")
         self.assertEqual(row["label"], "HOT")
-        self.assertLessEqual(set(CSV_FIELDS), set(row.keys()))
+        self.assertLessEqual(set(RAW_FIELDS), set(row.keys()))
 
-    def test_atomic_csv_write(self):
+    def test_atomic_json_write(self):
         with tempfile.TemporaryDirectory() as td:
-            store = JobStore(Path(td), csv_enabled=True, json_enabled=False)
-            result = store.save([self._make_job("k1"), self._make_job("k2")], run_id="20260914_000000")
+            store = self._store(td)
+            rows = [ItviecSource._to_row(self._make_job("k1")), ItviecSource._to_row(self._make_job("k2"))]
+            result = store.save(rows, run_id="20260914_000000")
             self.assertEqual(result.total, 2)
-            self.assertTrue(result.path_csv.exists())
-            self.assertTrue((Path(td) / "itviec_jobs_latest.csv").exists())
+            self.assertTrue(result.path_json.exists())
+            self.assertTrue((Path(td) / "itviec_jobs_latest.json").exists())
+            self.assertEqual(list(Path(td).glob("*.csv")), [])  # không còn CSV
+
+    def test_json_preserves_list_types(self):
+        with tempfile.TemporaryDirectory() as td:
+            job = self._make_job("k1")
+            job.tags = ["Python", "SQL"]
+            job.highlights = ["Top company"]
+            result = self._store(td).save([ItviecSource._to_row(job)], run_id="r1")
+            payload = json_mod.loads(result.path_json.read_text(encoding="utf-8"))
+            self.assertEqual(payload["jobs"][0]["skills"], ["Python", "SQL"])
+            self.assertEqual(payload["jobs"][0]["highlights"], ["Top company"])
+            # split_list chỉ còn để đọc dữ liệu CSV legacy
+            self.assertEqual(split_list("Python | SQL"), ["Python", "SQL"])
 
     def test_dedupe_in_store(self):
         with tempfile.TemporaryDirectory() as td:
-            store = JobStore(Path(td), csv_enabled=False, json_enabled=True)
-            result = store.save(
-                [self._make_job("k1"), self._make_job("k1", title="Updated")],
-                run_id="r1",
-            )
+            store = self._store(td)
+            rows = [
+                ItviecSource._to_row(self._make_job("k1")),
+                ItviecSource._to_row(self._make_job("k1", title="Updated")),
+            ]
+            result = store.save(rows, run_id="r1")
             self.assertEqual(result.total, 1)
 
     def test_json_payload_shape(self):
         with tempfile.TemporaryDirectory() as td:
-            store = JobStore(Path(td), csv_enabled=False, json_enabled=True)
-            result = store.save([self._make_job("k1")], run_id="r1")
+            store = self._store(td)
+            result = store.save([ItviecSource._to_row(self._make_job("k1"))], run_id="r1")
             with open(result.path_json, encoding="utf-8") as f:
                 payload = json_mod.load(f)
             self.assertEqual(payload["total_jobs"], 1)
-            self.assertEqual(payload["jobs"][0]["job_key"], "k1")
+            self.assertEqual(payload["source"], "itviec")
+            self.assertEqual(payload["jobs"][0]["job_id"], "k1")
             self.assertEqual(payload["jobs"][0]["scraped_at"], "2026-09-14T00:00:00+00:00")
+
+    def test_empty_snapshot_writes_nothing(self):
+        with tempfile.TemporaryDirectory() as td:
+            with self.assertLogs("pipeline.core.snapshot", level="WARNING"):
+                result = self._store(td).save([])
+            self.assertEqual(result.total, 0)
+            self.assertIsNone(result.path_json)
+            self.assertEqual(sorted(Path(td).iterdir()), [])
 
 
 if __name__ == "__main__":

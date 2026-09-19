@@ -8,11 +8,6 @@ Usage:
     python -m pipeline run all --no-kaggle         # chạy cả 2, skip Kaggle
     python -m pipeline run itviec --load-db        # kèm nạp Postgres
     python -m pipeline run itviec --data-dir /mnt/kaggle_data/itviec
-
-Tương thích ngược (vẫn chạy được):
-    python -m pipeline.build ...      # build/process/dashboard cũ
-    python -m pipeline.db ...         # load-db cũ
-    python -m itviec ...              # scraper itviec cũ
 """
 
 from __future__ import annotations
@@ -50,9 +45,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="Data source (or 'all' = chạy tuần tự itviec → topcv)",
     )
     r.add_argument("--data-dir", type=Path, default=None,
-                   help="Override raw data dir (vd /mnt/kaggle_data/itviec)")
+                   help="Override raw data dir cho 1 source (vd /mnt/kaggle_data/itviec)")
     r.add_argument("--dashboard-dir", type=Path, default=None,
-                   help="Override dashboard output dir")
+                   help="Override dashboard output dir cho 1 source")
     r.add_argument("--max-pages", type=int, default=None,
                    help="Giới hạn số pages (test nhanh). Default theo source.")
     r.add_argument("--workers", type=int, default=None,
@@ -107,6 +102,14 @@ def main(argv: list[str] | None = None) -> int:
     _setup_logging(args.verbose)
 
     targets = ALL_SOURCES if args.source == "all" else [args.source]
+    if len(targets) > 1 and (args.data_dir or args.dashboard_dir):
+        print(
+            "ERROR: --data-dir/--dashboard-dir chỉ dùng được với 1 source "
+            f"(đang chạy {len(targets)}: {', '.join(targets)}).",
+            file=sys.stderr,
+        )
+        return 2
+
     opts = RunOptions(
         data_dir=args.data_dir,
         dashboard_dir=args.dashboard_dir,

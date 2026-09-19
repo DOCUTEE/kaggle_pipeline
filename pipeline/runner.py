@@ -1,12 +1,14 @@
 """Unified runner — 1 PATTERN duy nhất cho mọi source.
 
-Mỗi source chạy đúng 6 bước giống nhau:
-    1. scrape      (adapter trong pipeline/sources/)
-    2. process     (pipeline/build.py)
-    3. dashboard   (pipeline/build.py)
-    4. load_db     (pipeline/db.py, optional)
-    5. kaggle_push (pipeline/build.py, optional, qua staging dir chuẩn)
-    6. cleanup     (xóa snapshot > 30 ngày)
+Mỗi source chạy đúng 6 bước giống nhau, và runner **không có nhánh nào theo
+tên source**: mọi khác biệt nằm trong adapter (`pipeline/sources/<ten>.py`).
+
+    1. scrape      (adapter.scrape)
+    2. process     (adapter.process)      — schema chuẩn ở core/transform
+    3. dashboard   (adapter.dashboard)    — shell chung ở core/dashboard
+    4. load_db     (adapter.load_db)      — optional, loader chung ở pipeline/db.py
+    5. kaggle_push (adapter.staging_files) — staging + push ở core/publish
+    6. cleanup     (xoá snapshot > keep_days)
 
 Mọi entrypoint đều gọi vào đây:
     - Airflow: dags/jobs_daily.py (scheduler duy nhất)
@@ -16,13 +18,13 @@ Mọi entrypoint đều gọi vào đây:
 from __future__ import annotations
 
 import logging
-import shutil
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
 from pipeline import settings
+from pipeline.core import publish
 from pipeline.sources import ALL_SOURCES, get_source
 
 logger = logging.getLogger(__name__)
@@ -47,7 +49,8 @@ class StepSummary:
     source: str
     steps_ok: list[str] = field(default_factory=list)
     steps_skipped: list[str] = field(default_factory=list)
-    jobs: int = 0
+    jobs: int = 0          # jobs scrape được
+    rows: int = 0          # rows sau process
     duration_s: float = 0.0
     error: str | None = None
 
@@ -61,7 +64,7 @@ def run_one(source_name: str, opts: RunOptions | None = None) -> StepSummary:
     t0 = time.time()
 
     cfg = settings.get_source(source_name)
-    adapter = get_source(source_name)
+    src = get_source(source_name)
 
     data_dir = settings.data_dir_for(cfg.name, opts.data_dir)
     dashboard_dir = settings.dashboard_dir_for(data_dir, opts.dashboard_dir)
@@ -77,7 +80,7 @@ def run_one(source_name: str, opts: RunOptions | None = None) -> StepSummary:
     )
 
     # 1. SCRAPE ──────────────────────────────────────────────────────────
-    scrape = adapter.scrape(
+    scrape = src.scrape(
         data_dir, max_pages=max_pages, workers=workers,
         timeout=opts.timeout, verbose=opts.verbose,
     )
@@ -86,44 +89,30 @@ def run_one(source_name: str, opts: RunOptions | None = None) -> StepSummary:
     logger.info("[%s] scrape done: %d jobs", source_name, scrape.count)
 
     if scrape.count == 0:
-        logger.warning("[%s] 0 jobs — vẫn chạy tiếp process/dashboard trên latest.", source_name)
+        logger.warning("[%s] 0 jobs — vẫn chạy tiếp process/dashboard trên snapshot cũ.", source_name)
 
     # 2. PROCESS ─────────────────────────────────────────────────────────
-    from pipeline import build as build_mod
-
-    if source_name == "itviec":
-        build_mod.process_itviec(data_dir, dashboard_dir)
-    else:
-        build_mod.process_topcv(data_dir, dashboard_dir)
+    processed = src.process(data_dir, dashboard_dir)
+    summary.rows = processed.rows
     summary.steps_ok.append("process")
 
     # 3. DASHBOARD ───────────────────────────────────────────────────────
-    if source_name == "itviec":
-        build_mod.build_itviec_dashboard(data_dir, dashboard_dir)
-    else:
-        build_mod.build_topcv_dashboard(data_dir, dashboard_dir)
+    src.dashboard(processed, dashboard_dir)
     summary.steps_ok.append("dashboard")
 
     # 4. LOAD DB (optional) ──────────────────────────────────────────────
     if opts.load_db:
-        from pipeline import db as db_mod
-
-        csv_name = "processed_jobs.csv" if source_name == "itviec" else "processed_topcv.csv"
-        csv_path = dashboard_dir / csv_name
-        if not csv_path.exists():
-            raise FileNotFoundError(f"Processed CSV not found: {csv_path}")
-        if source_name == "itviec":
-            db_mod.load_itviec_csv(csv_path)
-        else:
-            db_mod.load_topcv_csv(csv_path)
+        src.load_db(processed)
         summary.steps_ok.append("load_db")
     else:
         summary.steps_skipped.append("load_db")
 
     # 5. KAGGLE PUSH (optional) ──────────────────────────────────────────
     if opts.push_kaggle:
-        staging = _prepare_kaggle_staging(source_name, data_dir, dashboard_dir)
-        build_mod.push_to_kaggle(staging, kaggle_id)
+        staging = publish.prepare_staging(
+            settings.kaggle_dir_for(data_dir), src.staging_files(data_dir, dashboard_dir)
+        )
+        publish.push_to_kaggle(staging, kaggle_id)
         summary.steps_ok.append("kaggle_push")
     else:
         summary.steps_skipped.append("kaggle_push")
@@ -142,6 +131,17 @@ def run_one(source_name: str, opts: RunOptions | None = None) -> StepSummary:
 
 def run_many(sources: list[str], opts: RunOptions | None = None) -> list[StepSummary]:
     """Chạy tuần tự nhiều source. Source lỗi không chặn source sau (ghi error)."""
+    opts = opts or RunOptions()
+    if len(sources) > 1 and (opts.data_dir or opts.dashboard_dir):
+        # Mọi source dùng chung 1 schema processed_jobs.json → override thư mục cho
+        # nhiều source sẽ khiến chúng ghi đè nhau. DAG truyền --data-dir riêng cho
+        # từng task nên vẫn đúng.
+        raise ValueError(
+            "--data-dir/--dashboard-dir chỉ dùng được với 1 source "
+            f"(đang chạy {len(sources)}: {', '.join(sources)}). "
+            "Bỏ override để mỗi source dùng thư mục riêng trong DATA_ROOT."
+        )
+
     results: list[StepSummary] = []
     for name in sources:
         try:
@@ -158,39 +158,13 @@ def run_all(opts: RunOptions | None = None) -> list[StepSummary]:
 
 # ─── INTERNALS ────────────────────────────────────────────────────────────────
 
-def _prepare_kaggle_staging(source: str, data_dir: Path, dashboard_dir: Path) -> Path:
-    """Chuẩn hóa staging dir cho Kaggle: latest raw + processed + metadata."""
-    staging = settings.kaggle_dir_for(data_dir)
-    staging.mkdir(parents=True, exist_ok=True)
-
-    if source == "itviec":
-        wanted = {
-            data_dir / "itviec_jobs_latest.csv": "itviec_jobs.csv",
-            data_dir / "itviec_jobs_latest.json": "itviec_jobs.json",
-            dashboard_dir / "processed_jobs.csv": "processed_jobs.csv",
-        }
-    else:
-        wanted = {
-            data_dir / "topcv_jobs_latest.csv": "topcv_jobs.csv",
-            data_dir / "topcv_jobs_latest.json": "topcv_jobs.json",
-            dashboard_dir / "processed_topcv.csv": "processed_topcv.csv",
-        }
-
-    for src, dst_name in wanted.items():
-        if src.exists():
-            shutil.copy2(src, staging / dst_name)
-        else:
-            logger.warning("Kaggle staging: missing %s (skip)", src)
-
-    return staging
-
-
 def _cleanup_old_snapshots(data_dir: Path, keep_days: int = 30) -> None:
     """Xóa snapshot timestamped cũ hơn keep_days. Không đụng *_latest.*."""
     if keep_days <= 0:
         return
     cutoff = time.time() - keep_days * 86400
-    patterns = ("*_20*.csv", "*_20*.json", "*_20*.parquet")
+    # giữ pattern .csv để dọn luôn snapshot CSV cũ trên server
+    patterns = ("*_20*.json", "*_20*.csv", "*_20*.parquet")
     for pat in patterns:
         for p in data_dir.glob(pat):
             if "latest" in p.name:
@@ -207,6 +181,6 @@ def print_summary(results: list[StepSummary]) -> None:
     print(f"\n{'#' * 60}")
     print(f"# PIPELINE COMPLETE: {datetime.now().isoformat()}")
     for r in results:
-        status = f"ERROR: {r.error}" if r.error else f"jobs={r.jobs} steps={r.steps_ok}"
+        status = f"ERROR: {r.error}" if r.error else f"jobs={r.jobs} rows={r.rows} steps={r.steps_ok}"
         print(f"#  - {r.source}: {status}")
     print(f"{'#' * 60}")

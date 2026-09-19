@@ -1,8 +1,10 @@
-"""Orchestration: fetch pages -> parse -> validate -> merge/store.
+"""Orchestration: fetch pages -> parse -> validate -> trả jobs.
 
-The runner keeps the pipeline resumable by processing pages in order and
-merging results into an idempotent store, so a crash mid-run does not lose
-the work already completed and re-runs do not duplicate jobs.
+Runner giữ cho pipeline resumable: xử lý page theo thứ tự, gom kết quả, và
+retry các page lỗi ở lượt "repair" — nên crash giữa run không mất phần đã làm.
+
+Việc ghi file do `pipeline/core/snapshot.py::SnapshotStore` lo (dùng chung
+với mọi source), runner chỉ trả về danh sách Job đã parse.
 """
 
 from __future__ import annotations
@@ -16,7 +18,6 @@ from datetime import datetime, timezone
 from itviec.client import ItviecClient
 from itviec.models import Job
 from itviec.parser import parse_page
-from itviec.storage import JobStore, StoreResult
 
 logger = logging.getLogger(__name__)
 
@@ -31,24 +32,22 @@ class RunStats:
 
 
 class ScrapeRunner:
-    """Fetch + parse + store all listing pages."""
+    """Fetch + parse toàn bộ listing pages; trả jobs cho tầng storage."""
 
     def __init__(
         self,
         client: ItviecClient,
-        store: JobStore,
         *,
         workers: int = 1,
         fail_threshold: float = 0.5,
         repair_retries: int = 2,
     ) -> None:
         self.client = client
-        self.store = store
         self.workers = workers
         self.fail_threshold = fail_threshold
         self.repair_retries = repair_retries
 
-    def run(self, *, max_pages: int | None = None) -> tuple[RunStats, StoreResult]:
+    def run(self, *, max_pages: int | None = None) -> tuple[RunStats, list[Job]]:
         self._validate_robots()
         total = self.client.fetch_total_jobs()
         total_pages = max(1, (total + self.client.PAGE_SIZE - 1) // self.client.PAGE_SIZE)
@@ -85,9 +84,10 @@ class ScrapeRunner:
                     logger.exception("Page %d REPAIR also failed", page)
                     stats.pages_failed.append(page)
 
+        stats.jobs_parsed = len(jobs)
         logger.info("Parsed %d jobs across %d pages", len(jobs), stats.pages_fetched)
-        store_result = self.store.save(jobs, run_id=scraped_at[:19].replace(":", "").replace("T", "_"))
-        return stats, store_result
+        self.run_id = scraped_at[:19].replace(":", "").replace("T", "_")
+        return stats, jobs
 
     # ------------------------------------------------------------------
     def _run_sequential(
