@@ -44,11 +44,22 @@ def split_list(value: Any) -> list[str]:
     return [part.strip() for part in text.split(LIST_SEP) if part.strip()]
 
 
+#: Mode cho file ghi ra volume dùng chung (host user + Airflow container khác uid).
+#: mkstemp mặc định tạo 0600 → user khác không đọc được; 0664 cho phép đọc/rename.
+SHARED_FILE_MODE = 0o664
+
+
 def _atomic_write(path: Path, writer) -> None:
-    """Ghi qua temp file cùng thư mục rồi `os.replace()` (atomic trên POSIX)."""
+    """Ghi qua temp file cùng thư mục rồi `os.replace()` (atomic trên POSIX).
+
+    Dùng `os.replace` nên ghi đè được cả file của user khác (rename chỉ cần quyền
+    trên thư mục) — quan trọng vì volume này được ghi bởi cả host user lẫn
+    Airflow container (uid 50000).
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
     try:
+        os.fchmod(fd, SHARED_FILE_MODE)
         with os.fdopen(fd, "w", newline="", encoding="utf-8") as f:
             writer(f)
         os.replace(tmp_name, path)
@@ -67,6 +78,7 @@ def _copy_latest(source: Path, latest_name: str) -> None:
     os.close(fd)
     try:
         shutil.copy2(source, tmp_name)
+        os.chmod(tmp_name, SHARED_FILE_MODE)  # copy2 giữ mode gốc (0600)
         os.replace(tmp_name, latest)
     except BaseException:
         try:
@@ -80,6 +92,15 @@ def atomic_write_json(path: Path, payload: Any) -> Path:
     """Ghi JSON atomic (temp + os.replace) — dùng cho cả raw và processed."""
     def writer(f):
         json.dump(payload, f, ensure_ascii=False, indent=2)
+
+    _atomic_write(Path(path), writer)
+    return Path(path)
+
+
+def atomic_write_text(path: Path, text: str) -> Path:
+    """Ghi text atomic (dashboard HTML) — overwrite được file của user khác."""
+    def writer(f):
+        f.write(text)
 
     _atomic_write(Path(path), writer)
     return Path(path)

@@ -5,6 +5,7 @@ Chạy: python3 -m unittest discover -s tests -v
 
 from __future__ import annotations
 
+import stat
 import sys
 import tempfile
 import unittest
@@ -24,7 +25,11 @@ from pipeline.core.dashboard import (  # noqa: E402
     render_dashboard,
     standard_kpis,
 )
-from pipeline.core.snapshot import SnapshotStore, split_list  # noqa: E402
+from pipeline.core.snapshot import (  # noqa: E402
+    SnapshotStore,
+    atomic_write_text,
+    split_list,
+)
 from pipeline.core.transform import (  # noqa: E402
     PROCESSED_CORE_FIELDS,
     build_processed_df,
@@ -141,6 +146,36 @@ class TestSnapshotCore(unittest.TestCase):
         self.assertEqual(split_list(""), [])
         self.assertEqual(split_list(float("nan")), [])
         self.assertEqual(split_list(["x"]), ["x"])
+
+    def test_shared_file_mode(self):
+        """File trên volume dùng chung (host uid 1000 + container uid 50000) phải đọc được."""
+        with tempfile.TemporaryDirectory() as td:
+            result = SnapshotStore(Path(td), "x_jobs", key_field="job_id", source="x").save(
+                [{"job_id": "1", "title": "t"}]
+            )
+            self.assertEqual(stat.S_IMODE(result.path_json.stat().st_mode), 0o664)
+            self.assertEqual(
+                stat.S_IMODE((Path(td) / "x_jobs_latest.json").stat().st_mode), 0o664
+            )
+            html = atomic_write_text(Path(td) / "dash.html", "<html/>")
+            self.assertEqual(stat.S_IMODE(html.stat().st_mode), 0o664)
+
+    def test_atomic_overwrite_of_foreign_file(self):
+        """File do user khác tạo (không ghi được) vẫn phải overwrite được qua rename."""
+        with tempfile.TemporaryDirectory() as td:
+            d = Path(td)
+            store = SnapshotStore(d, "x_jobs", key_field="job_id", source="x")
+            store.save([{"job_id": "1", "title": "v1"}], run_id="r1")
+            latest = d / "x_jobs_latest.json"
+            latest.chmod(0o444)  # chỉ đọc → write_text() sẽ fail, atomic replace thì không
+
+            store.save([{"job_id": "1", "title": "v2"}], run_id="r2")
+            self.assertIn("v2", latest.read_text(encoding="utf-8"))
+
+            html = atomic_write_text(d / "dash.html", "<html>v1</html>")
+            html.chmod(0o444)
+            atomic_write_text(d / "dash.html", "<html>v2</html>")
+            self.assertEqual(html.read_text(encoding="utf-8"), "<html>v2</html>")
 
     def test_latest_alias_points_to_snapshot(self):
         with tempfile.TemporaryDirectory() as td:

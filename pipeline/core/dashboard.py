@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from pipeline.core.snapshot import atomic_write_text
 from pipeline.core.transform import SENIORITY_ORDER
 
 logger = logging.getLogger(__name__)
@@ -518,9 +519,8 @@ def render_dashboard(
         ),
     )
 
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(html, encoding="utf-8")
-    return out_path
+    # Ghi atomic (rename) để overwrite được file do user khác tạo trên volume dùng chung
+    return atomic_write_text(out_path, html)
 
 
 #: KPI chung cho mọi source (tự bỏ qua nếu thiếu cột).
