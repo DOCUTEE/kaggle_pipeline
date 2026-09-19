@@ -1,128 +1,91 @@
 #!/bin/bash
-# Server Setup Script for TopCV Pipeline
-# Deploy to 100.80.131.68
+# Setup server environment — Airflow-only (không dùng cron).
+# Usage: ./deploy/setup_server.sh
 
 set -e
 
 SERVER_IP="100.80.131.68"
-SERVER_USER="root"
-REMOTE_DIR="/opt/topcv_pipeline"
-LOCAL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+SERVER_USER="docutee"
+SERVER_PASS="12032512"
+REMOTE_DIR="/mnt/kaggle_data/kaggle_pipeline"
 
 echo "=========================================="
-echo "Deploying TopCV Pipeline to ${SERVER_IP}"
+echo "Setting up server ${SERVER_IP} (Airflow)"
 echo "=========================================="
 
-# 1. Create remote directory
-echo "[1/6] Creating remote directory..."
-ssh ${SERVER_USER}@${SERVER_IP} "mkdir -p ${REMOTE_DIR}" || true
+# 1. Sync code
+echo "[1/5] Syncing code..."
+sshpass -p "${SERVER_PASS}" ssh -o StrictHostKeyChecking=no ${SERVER_USER}@${SERVER_IP} \
+    "mkdir -p ${REMOTE_DIR} /mnt/kaggle_data/logs"
+sshpass -p "${SERVER_PASS}" rsync -avz --progress -e "ssh -o StrictHostKeyChecking=no" \
+    --exclude='.venv' \
+    --exclude='__pycache__' \
+    --exclude='*.pyc' \
+    --exclude='logs/' \
+    --exclude='data/' \
+    "$(cd "$(dirname "$0")/.." && pwd)/" ${SERVER_USER}@${SERVER_IP}:${REMOTE_DIR}/
 
-# 2. Copy project files
-echo "[2/6] Copying project files..."
-scp -r "${LOCAL_DIR}/scraper" ${SERVER_USER}@${SERVER_IP}:${REMOTE_DIR}/
-scp -r "${LOCAL_DIR}/pipeline" ${SERVER_USER}@${SERVER_IP}:${REMOTE_DIR}/
-scp -r "${LOCAL_DIR}/dashboard" ${SERVER_USER}@${SERVER_IP}:${REMOTE_DIR}/
-scp -r "${LOCAL_DIR}/data" ${SERVER_USER}@${SERVER_IP}:${REMOTE_DIR}/
-scp "${LOCAL_DIR}/requirements.txt" ${SERVER_USER}@${SERVER_IP}:${REMOTE_DIR}/
-
-# 3. Install dependencies
-echo "[3/6] Installing Python dependencies..."
-ssh ${SERVER_USER}@${SERVER_IP} << 'EOF'
-cd /opt/topcv_pipeline
-
-# Install Python 3 and pip
-apt-get update -qq
-apt-get install -y -qq python3 python3-pip python3-venv
-
-# Create virtual environment
-python3 -m venv venv
-source venv/bin/activate
-
-# Install requirements
-pip install --upgrade pip
-pip install -r requirements.txt
-
-# Install Playwright browsers
-playwright install chromium
-playwright install-deps
-
-echo "Dependencies installed!"
+# 2. Gỡ cron cũ (nếu còn) — pipeline giờ chạy bằng Airflow DAG jobs_daily
+echo "[2/5] Removing legacy cron jobs..."
+sshpass -p "${SERVER_PASS}" ssh -o StrictHostKeyChecking=no ${SERVER_USER}@${SERVER_IP} << 'EOF'
+crontab -l 2>/dev/null | grep -v 'kaggle_data/topcv' | grep -v 'kaggle_data/itviec' | crontab - || true
+rm -f /mnt/kaggle_data/topcv/run_daily.sh
+echo "Legacy cron removed."
 EOF
 
-# 4. Setup Kaggle credentials
-echo "[4/6] Setting up Kaggle credentials..."
-ssh ${SERVER_USER}@${SERVER_IP} << 'EOF'
-mkdir -p ~/.kaggle
-cat > ~/.kaggle/kaggle.json << 'KAGGLE_EOF'
-{
-  "username": "docutee",
-  "key": "YOUR_KAGGLE_KEY_HERE"
-}
-KAGGLE_EOF
-chmod 600 ~/.kaggle/kaggle.json
-echo "Kaggle credentials setup (update key manually)!"
+# 2.5. Cài Docker nếu chưa có (cần sudo — dùng SSH password)
+echo "[2.5/5] Ensuring Docker is installed..."
+sshpass -p "${SERVER_PASS}" ssh -o StrictHostKeyChecking=no ${SERVER_USER}@${SERVER_IP} "SUDO_PASS='${SERVER_PASS}' bash -s" << 'EOF'
+if ! command -v docker >/dev/null 2>&1; then
+  echo "Docker not found — installing via apt..."
+  echo "$SUDO_PASS" | sudo -S apt-get update -qq
+  echo "$SUDO_PASS" | sudo -S apt-get install -y -qq docker.io docker-compose-plugin
+  echo "$SUDO_PASS" | sudo -S systemctl enable --now docker
+  echo "$SUDO_PASS" | sudo -S usermod -aG docker "$USER" || true
+else
+  echo "Docker already installed: $(docker --version)"
+fi
 EOF
 
-# 5. Setup cron job
-echo "[5/6] Setting up daily cron job..."
-ssh ${SERVER_USER}@${SERVER_IP} << 'EOF'
-# Create runner script
-cat > /opt/topcv_pipeline/run_daily.sh << 'RUNNER_EOF'
-#!/bin/bash
-cd /opt/topcv_pipeline
-source venv/bin/activate
-python pipeline/daily_pipeline.py >> /var/log/topcv_pipeline.log 2>&1
-RUNNER_EOF
-chmod +x /opt/topcv_pipeline/run_daily.sh
-
-# Add cron job (6 AM daily)
-(crontab -l 2>/dev/null | grep -v "topcv_pipeline"; echo "0 6 * * * /opt/topcv_pipeline/run_daily.sh") | crontab -
-
-# Create log directory
-touch /var/log/topcv_pipeline.log
-
-echo "Cron job setup (6 AM daily)!"
+# 3. Start infra (Postgres + Grafana + Airflow) bằng Docker Compose
+echo "[3/5] Starting Docker infra (postgres, grafana, airflow)..."
+sshpass -p "${SERVER_PASS}" ssh -o StrictHostKeyChecking=no ${SERVER_USER}@${SERVER_IP} << 'EOF'
+cd /mnt/kaggle_data/kaggle_pipeline/infra
+docker compose up -d --build
+echo "Waiting for Airflow webserver..."
+sleep 20
+docker compose ps
 EOF
 
-# 6. Setup Streamlit dashboard
-echo "[6/6] Setting up Streamlit dashboard..."
-ssh ${SERVER_USER}@${SERVER_IP} << 'EOF'
-cd /opt/topcv_pipeline
+# 4. Start dashboard
+echo "[4/5] Starting dashboard..."
+sshpass -p "${SERVER_PASS}" ssh -o StrictHostKeyChecking=no ${SERVER_USER}@${SERVER_IP} << 'EOF'
+# Kill existing streamlit ([s] trick tránh pkill tự match shell cha)
+pkill -f '[s]treamlit run dashboard' 2>/dev/null || true
+sleep 2
 
-# Create systemd service for Streamlit
-cat > /etc/systemd/system/topcv-dashboard.service << 'SERVICE_EOF'
-[Unit]
-Description=TopCV Job Dashboard
-After=network.target
-
-[Service]
-Type=simple
-User=root
-WorkingDirectory=/opt/topcv_pipeline
-ExecStart=/opt/topcv_pipeline/venv/bin/streamlit run dashboard/app.py --server.port 8501 --server.address 0.0.0.0 --server.headless true
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-SERVICE_EOF
-
-# Enable and start service
-systemctl daemon-reload
-systemctl enable topcv-dashboard
-systemctl start topcv-dashboard
-
-echo "Dashboard started on port 8501!"
+# Start dashboard
+cd /mnt/kaggle_data/kaggle_pipeline
+source .venv/bin/activate 2>/dev/null || python3 -m venv .venv && source .venv/bin/activate
+pip install --upgrade pip -q
+pip install -r requirements.txt -q
+playwright install chromium 2>/dev/null || true
+# setsid + nohup: detach hẳn khỏi SSH session (môi trường không pty)
+setsid nohup .venv/bin/streamlit run dashboard/app.py \
+    --server.port 8501 \
+    --server.address 0.0.0.0 \
+    --server.headless true \
+    > /mnt/kaggle_data/logs/streamlit.log 2>&1 </dev/null &
+disown
+sleep 10
+ss -ltn | grep 8501 && echo "Dashboard started on port 8501!"
 EOF
 
 echo ""
 echo "=========================================="
-echo "Deployment Complete!"
+echo "Setup Complete (Airflow-only)!"
 echo "=========================================="
-echo "Dashboard URL: http://${SERVER_IP}:8501"
-echo ""
-echo "To run first scrape:"
-echo "  ssh ${SERVER_USER}@${SERVER_IP}"
-echo "  cd ${REMOTE_DIR}"
-echo "  source venv/bin/activate"
-echo "  python pipeline/daily_pipeline.py"
+echo "Airflow UI: http://${SERVER_IP}:8080 (admin/admin — đổi sau lần đầu)"
+echo "DAG: jobs_daily (schedule 00:00 UTC = 07:00 ICT, trigger tay trên UI)"
+echo "Dashboard: http://${SERVER_IP}:8501"
+echo "SSH: ssh ${SERVER_USER}@${SERVER_IP}"

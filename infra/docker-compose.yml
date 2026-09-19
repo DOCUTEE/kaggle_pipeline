@@ -18,6 +18,25 @@ services:
       timeout: 3s
       retries: 5
 
+  # ─── MINIO (object storage cho PDF arXiv, S3-compatible) ──────────────────
+  # Console: http://localhost:9001 (minioadmin/minioadmin, đổi qua env khi lên server)
+  # API S3 : http://localhost:9000 — pipeline đọc qua env MINIO_ENDPOINT/...
+  # Bucket khởi tạo sẵn: arxiv-pdfs (tự tạo nếu chưa có trong code cũng được)
+  minio:
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z.hotfix.7aa24e772  # mirror chính thức (Docker Hub rate-limit pull anonymous)
+    container_name: kaggle_minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    # (không healthcheck: image minio không sẵn curl, container vẫn chạy bình thường)
+
   grafana:
     image: grafana/grafana:latest
     container_name: kaggle_grafana
@@ -37,6 +56,111 @@ services:
       postgres:
         condition: service_healthy
 
+  # ─── AIRFLOW (scheduler duy nhất, thay cron) ──────────────────────────────
+  # Airflow chạy DAG dags/jobs_daily.py mỗi ngày 00:00 UTC (= 07:00 ICT).
+  # Code pipeline được mount read-only vào container, chạy qua `python -m pipeline run`.
+  # Truy cập UI: http://localhost:8080 (admin/admin, đổi qua env khi lên server).
+  airflow-db:
+    image: postgres:15-alpine
+    container_name: kaggle_airflow_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: airflow
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+    volumes:
+      - airflow_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow -d airflow"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  airflow-init:
+    image: apache/airflow:2.9.3-python3.12
+    depends_on:
+      airflow-db:
+        condition: service_healthy
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db:5432/airflow
+      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+      _PIP_ADDITIONAL_REQUIREMENTS: "pandas beautifulsoup4 requests lxml kaggle typer psycopg2-binary playwright plotly pydantic tenacity"
+    entrypoint: /bin/bash
+    command: -c "airflow db migrate && airflow users create --username admin --password admin --firstname admin --lastname admin --role Admin --email admin@example.com || true"
+    volumes:
+      - ../dags:/opt/airflow/dags:ro
+      - ..:/opt/airflow/kaggle_pipeline:ro
+      - airflow_logs:/opt/airflow/logs
+
+  airflow-scheduler:
+    image: apache/airflow:2.9.3-python3.12
+    container_name: kaggle_airflow_scheduler
+    restart: unless-stopped
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db:5432/airflow
+      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+      AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+      PYTHONPATH: /opt/airflow/kaggle_pipeline
+      PROJECT_ROOT: /opt/airflow/kaggle_pipeline
+      DATA_ROOT: /opt/airflow/data
+      PIPELINE_PYTHON: python
+      PIPELINE_LOAD_DB: "1"
+      PIPELINE_SOURCES: ${PIPELINE_SOURCES:-itviec,topcv}
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: kaggle_pipeline
+      DB_USER: pipeline
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-pipeline_dev_2024}
+      # Kaggle push: lấy từ env của máy host (xem infra/.env.example).
+      # Token mới (KGAT_...) đi vào KAGGLE_API_TOKEN — kaggle>=2.0 bắt buộc.
+      # Chạy: export KAGGLE_API_TOKEN=... trước `docker compose up -d`,
+      # hoặc ghi vào file infra/.env (KHÔNG commit file này).
+      KAGGLE_USERNAME: ${KAGGLE_USERNAME:-}
+      KAGGLE_API_TOKEN: ${KAGGLE_API_TOKEN:-}
+      # Dataset id: KHÔNG set ở đây — để pipeline/settings.py tự build từ
+      # KAGGLE_USERNAME (tránh env rỗng "" ghi đè default trong code).
+      # Chỉ export ITVIEC/TOPCV/ARXIV_KAGGLE_DATASET khi muốn override hẳn id.
+      _PIP_ADDITIONAL_REQUIREMENTS: "pandas beautifulsoup4 requests lxml kaggle typer psycopg2-binary playwright plotly pydantic tenacity"
+    volumes:
+      - ../dags:/opt/airflow/dags:ro
+      - ..:/opt/airflow/kaggle_pipeline:ro
+      - ../data:/opt/airflow/data
+      - airflow_logs:/opt/airflow/logs
+    command: scheduler
+
+  airflow-webserver:
+    image: apache/airflow:2.9.3-python3.12
+    container_name: kaggle_airflow_webserver
+    restart: unless-stopped
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db:5432/airflow
+      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+      AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "True"
+    ports:
+      - "8080:8080"
+    volumes:
+      - ../dags:/opt/airflow/dags:ro
+      - ..:/opt/airflow/kaggle_pipeline:ro
+      - airflow_logs:/opt/airflow/logs
+    command: webserver
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
 volumes:
   pgdata:
+  minio_data:
   grafana_data:
+  airflow_pgdata:
+  airflow_logs:

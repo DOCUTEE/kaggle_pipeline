@@ -25,7 +25,7 @@
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                    DAILY CRON (6AM)                      │
+│              AIRFLOW DAG jobs_daily (00:00 UTC = 07:00 ICT)       │
 ├─────────────────────────────────────────────────────────┤
 │                                                         │
 │  ┌──────────┐    ┌──────────┐    ┌──────────┐          │
@@ -69,11 +69,9 @@
 │   │   └── app.py                  # Streamlit dashboard
 │   ├── data/
 │   │   └── raw/topcv/              # Scraped data
-│   ├── run_daily.sh                # Cron script
 │   └── requirements.txt
 │
 └── logs/                           # Shared logs
-    ├── cron.log
     └── topcv_pipeline.log
 ```
 
@@ -81,7 +79,40 @@
 
 ## 🚀 Quick Start
 
-### TopCV Pipeline
+### Development Workflow
+
+```bash
+# 1. Dev ở local
+cd /Users/quangnguyen/startup/kaggle_pipeline
+source .venv/bin/activate
+python pipeline/daily_pipeline.py  # Test locally
+
+# 2. Push code lên server
+./deploy/push_to_server.sh
+
+# 3. Deploy trên server
+./deploy/setup_server.sh
+```
+
+### Local Development (uv)
+
+```bash
+# Install dependencies (uv quản lý .venv + uv.lock)
+uv sync
+uv run playwright install chromium
+
+# Thêm/sửa dep: sửa pyproject.toml rồi
+uv add <package>            # hoặc sửa tay pyproject.toml + uv sync
+uv export --frozen --format requirements-txt --no-hashes -o requirements.txt  # giữ cho deploy server (pip)
+
+# Run scraper
+uv run python pipeline/daily_pipeline.py
+
+# Run dashboard
+uv run streamlit run dashboard/app.py --server.port 8501
+```
+
+### Server Management
 
 ```bash
 # SSH to server
@@ -96,15 +127,12 @@ source .venv/bin/activate
 # Run scraper manually
 python pipeline/daily_pipeline.py
 
-# Run dashboard
-streamlit run dashboard/app.py --server.port 8501 --server.address 0.0.0.0 --server.headless true
-```
+# View logs
+tail -f /mnt/kaggle_data/logs/topcv_pipeline.log
 
-### ITviec Pipeline
-
-```bash
-cd /mnt/kaggle_data/itviec
-python -m itviec --output data/itviec_v4 --workers 4
+# Restart dashboard
+pkill -f streamlit
+streamlit run dashboard/app.py --server.port 8501 --server.address 0.0.0.0 --server.headless true &
 ```
 
 ---
@@ -114,7 +142,7 @@ python -m itviec --output data/itviec_v4 --workers 4
 ### Features
 - ✅ Playwright-based (bypasses Cloudflare)
 - ✅ Paginated scraping
-- ✅ Daily cron automation
+- ✅ Daily Airflow automation (DAG jobs_daily)
 - ✅ Streamlit dashboard
 - ✅ Kaggle integration (when configured)
 
@@ -154,13 +182,20 @@ python -m itviec --output data/itviec_v4 --workers 4
 └── logs/                   # Shared logs
 ```
 
-### Cron Schedule
+### Airflow Schedule (scheduler duy nhất, không dùng cron)
 ```bash
-# TopCV: Daily at 6:00 AM
-0 6 * * * /mnt/kaggle_data/topcv/run_daily.sh >> /mnt/kaggle_data/logs/topcv_pipeline.log 2>&1
+# DAG jobs_daily — 00:00 UTC daily (= 07:00 ICT)
+# Triển khai: cd infra && docker compose up -d
+# Trigger tay: http://100.80.131.68:8080 → jobs_daily → Trigger DAG
+```
 
-# ITviec: Daily at 7:00 AM
-0 7 * * * /mnt/kaggle_data/itviec/scripts/daily_pipeline.sh >> /mnt/kaggle_data/logs/itviec_pipeline.log 2>&1
+### Deploy Workflow
+```bash
+# 1. Push code from local to server
+./deploy/push_to_server.sh
+
+# 2. Setup server (first time only)
+./deploy/setup_server.sh
 ```
 
 ### Streamlit Dashboard

@@ -1,4 +1,4 @@
-# Deployment Guide
+# Deployment Guide (Airflow-only)
 
 ## Server Info
 - **IP**: 100.80.131.68
@@ -9,9 +9,10 @@
 ## Directory Structure
 ```
 /mnt/kaggle_data/
-├── itviec/           # ITviec scraper
-├── topcv/            # TopCV scraper
-└── logs/             # Shared logs
+├── kaggle_pipeline/    # repo (code + dags + infra)
+├── itviec/             # ITviec data
+├── raw/topcv/          # TopCV data
+└── logs/               # Shared logs
 ```
 
 ## SSH Access
@@ -20,60 +21,131 @@ ssh docutee@100.80.131.68
 # Password: 12032512
 ```
 
-## TopCV Pipeline
-
-### Location
-`/mnt/kaggle_data/topcv/`
-
-### Run Manually
+## Deploy
 ```bash
-cd /mnt/kaggle_data/topcv
-source .venv/bin/activate
-python pipeline/daily_pipeline.py
+# Từ local: sync code + gỡ cron cũ + dựng infra + start dashboard
+./deploy/setup_server.sh
 ```
 
-### Cron Job
+Chi tiết xem `deploy/setup_server.sh`: sync code tới
+`/mnt/kaggle_data/kaggle_pipeline`, xóa crontab legacy, chạy
+`infra/docker-compose.yml` (postgres + grafana + airflow).
+
+## CI/CD — chỉ `main` mới test + deploy, làm hàng ngày ở `develop`
+
+| Branch | CI chạy gì |
+|---|---|
+| `develop` (default làm việc) | Không chạy gì — push thoải mái |
+| PR `develop` → `main` | Chạy **test** (báo xanh/đỏ ngay trên PR, không deploy) |
+| Push/`merge` vào `main` | Chạy **test** → xanh mới **deploy** |
+
+```bash
+git checkout develop
+# ... code ...
+git add -A && git commit -m "..." && git push origin develop
+# mở PR develop -> main trên GitHub, chờ test xanh rồi Merge
 ```
-0 6 * * * /mnt/kaggle_data/topcv/run_daily.sh >> /mnt/kaggle_data/logs/topcv_pipeline.log 2>&1
+
+Khuyên bật thêm branch protection cho `main` (GitHub → Settings → Branches →
+Add rule): Require a pull request + Require status checks (`test`). Khi đó code
+dở/test đỏ không thể merge lên `main` = không bao giờ deploy bậy.
+
+Workflow `.github/workflows/deploy.yml` chạy mỗi khi push lên `main` qua 2 lớp:
+1. **test** — `pip install -r requirements.txt` + `python -m unittest discover -s tests -v`
+   (Python 3.12 khớp server, offline, ~15s). Đỏ thì deploy không bao giờ chạy.
+2. **deploy** (`needs: [test]`) — rsync code (trừ `data/` + `logs/` + `.venv`
+   để không đè mất dataset server đang cào) → `docker compose up -d` →
+   reinstall deps → restart Streamlit → health check `:8080` + `:8501`.
+
+Chạy test ở local trước khi push: `python -m unittest discover -s tests -v`.
+Bỏ qua 1 lần deploy: thêm `[skip deploy]` vào commit message (thêm
+`[skip test]` để bỏ qua cả lớp test — chỉ dùng khi cần).
+
+### Secrets cần tạo (GitHub repo → Settings → Secrets and variables → Actions)
+
+| Secret | Giá trị |
+|---|---|
+| `SERVER_HOST` | `100.80.131.68` |
+| `SERVER_USER` | `docutee` |
+| `SERVER_PASSWORD` | password SSH (= password sudo docker) |
+| `TAILSCALE_AUTHKEY` | Auth key Tailscale (Keys → Generate auth key: Reusable ON, expiry 90 ngày, Tags để trống, mô tả `github-ci`). Key chỉ hiện 1 lần lúc tạo — copy ngay vào secret. |
+
+Chưa có secrets nào thì workflow fail ở bước SSH — tạo đủ secrets rồi push lại
+(commit trống cũng được: `git commit --allow-empty -m "trigger deploy"`).
+
+## Pipeline (Airflow — scheduler duy nhất, không dùng cron)
+
+- **DAG**: `jobs_daily`, schedule `0 0 * * *` (00:00 UTC = 07:00 ICT)
+- **UI**: http://100.80.131.68:8080 (admin/admin — đổi sau lần đầu)
+- **Trigger tay**: Airflow UI → `jobs_daily` → Trigger DAG
+- **Log**: Airflow UI → DAG → task `run_itviec` / `run_topcv` → Logs
+
+### Run Manually (debug, không schedule)
+```bash
+cd /mnt/kaggle_data/kaggle_pipeline
+source .venv/bin/activate
+python -m pipeline run itviec --load-db
+python -m pipeline run topcv --max-pages 5 --no-kaggle
 ```
 
 ### Dashboard
 ```bash
-cd /mnt/kaggle_data/topcv
+cd /mnt/kaggle_data/kaggle_pipeline
 source .venv/bin/activate
 streamlit run dashboard/app.py --server.port 8501 --server.address 0.0.0.0 --server.headless true
 ```
 
 Access at: http://100.80.131.68:8501
 
-## Kaggle Setup
+## Kaggle Setup (push dataset)
 
-### Get API Key
-1. Go to https://www.kaggle.com/settings/api
-2. Generate New Token
-3. Download kaggle.json
+### 1. Lấy API key (làm tay — 2 phút)
+1. Mở https://www.kaggle.com/settings/api → **Create New Token** → tải `kaggle.json`
+   (chứa `username` + `key`).
+2. Ghi nhớ `username` trong file — owner của mọi dataset PHẢI là user này,
+   nếu không push sẽ 403. Hiện tại `ITVIEC_KAGGLE_DATASET=quangcrawler/itviec-jobs`
+   còn topcv/arxiv theo `KAGGLE_USERNAME` (default `docutee`): nếu bạn chỉ sở hữu
+   1 account thì sửa dataset còn lại về account đó.
 
-### Install on Server
+### 2. Preflight local (không push gì cả)
 ```bash
-mkdir -p ~/.kaggle
-# Copy your kaggle.json to ~/.kaggle/kaggle.json
-chmod 600 ~/.kaggle/kaggle.json
+export KAGGLE_USERNAME=quangcrawler KAGGLE_API_TOKEN=<token KGAT_...>
+python -m pipeline check-kaggle
+# → SẴN SÀNG PUSH mới đi tiếp; FAIL thì đọc kỹ từng dòng lỗi
 ```
 
-### Test
+### 3. Đưa creds lên server (chọn 1 cách)
 ```bash
-kaggle datasets list -s test
+# Cách A (khuyên dùng): file env cho compose — KHÔNG commit
+cp infra/.env.example infra/.env   # rồi điền KAGGLE_USERNAME, KAGGLE_KEY
+cd infra && docker compose up -d
+
+# Cách B: export trước khi up
+export KAGGLE_USERNAME=<user> KAGGLE_KEY=<key>
+cd infra && docker compose up -d
+```
+Scheduler đọc `KAGGLE_API_TOKEN` từ env (đã đấu sẵn trong
+`infra/docker-compose.yml`, cần `kaggle>=2.0` — token KGAT_... không đi qua
+`KAGGLE_KEY` cũ). Cách cũ `~/.kaggle/kaggle.json` trên server
+vẫn chạy được nhưng không cần nữa khi đã có env.
+
+### Test push thật
+```bash
+# Local: chạy 1 source, để push bật (mặc định)
+python -m pipeline run topcv --max-pages 2
+# Server: Airflow UI → jobs_daily → Trigger, xem log task run_topcv tìm "Kaggle push SUCCESS"
 ```
 
 ## Monitoring
 
 ### View Logs
 ```bash
-# Pipeline logs
-tail -f /mnt/kaggle_data/logs/topcv_pipeline.log
+# Airflow task logs: xem trên UI (khuyên dùng)
+# Dashboard log
+tail -f /mnt/kaggle_data/logs/streamlit.log
 
-# Cron logs
-tail -f /mnt/kaggle_data/logs/cron.log
+# Manual run logs
+tail -f /mnt/kaggle_data/kaggle_pipeline/logs/pipeline_itviec_*.log
 ```
 
 ### Check Processes
@@ -81,8 +153,8 @@ tail -f /mnt/kaggle_data/logs/cron.log
 # Check if dashboard is running
 ps aux | grep streamlit
 
-# Check cron jobs
-crontab -l
+# Check infra
+cd /mnt/kaggle_data/kaggle_pipeline/infra && docker compose ps
 ```
 
 ## Troubleshooting
@@ -94,24 +166,23 @@ ps aux | grep streamlit
 
 # Restart dashboard
 pkill -f streamlit
-cd /mnt/kaggle_data/topcv && source .venv/bin/activate && streamlit run dashboard/app.py --server.port 8501 --server.address 0.0.0.0 --server.headless true &
+cd /mnt/kaggle_data/kaggle_pipeline && source .venv/bin/activate && streamlit run dashboard/app.py --server.port 8501 --server.address 0.0.0.0 --server.headless true &
 ```
 
 ### Scraper not working
 ```bash
 # Check Playwright
-cd /mnt/kaggle_data/topcv && source .venv/bin/activate
+cd /mnt/kaggle_data/kaggle_pipeline && source .venv/bin/activate
 python -c "from playwright.sync_api import sync_playwright; print('OK')"
 
 # Reinstall if needed
 playwright install chromium
 ```
 
-### Cron not running
+### DAG not running
 ```bash
-# Check cron service
-sudo service cron status
-
-# View cron logs
-grep CRON /var/log/syslog
+cd /mnt/kaggle_data/kaggle_pipeline/infra
+docker compose ps
+docker compose logs -f airflow-scheduler
+# Trigger tay trên UI để test, check task logs trên UI
 ```

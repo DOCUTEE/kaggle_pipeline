@@ -22,9 +22,11 @@ topcv/
 │   └── app.py                  # Streamlit dashboard
 ├── data/
 │   └── raw/topcv/              # Output data
-├── run_daily.sh                # Cron script
 └── requirements.txt
 ```
+
+> Schedule duy nhất là Airflow DAG `jobs_daily` (không dùng cron).
+> Chạy tay: `python -m pipeline run topcv`.
 
 ## Usage
 
@@ -74,11 +76,9 @@ SCRAPE_MAX_PAGES = 50
 SCRAPE_HEADLESS = True
 ```
 
-## Cron Schedule
-Daily at 6:00 AM:
-```
-0 6 * * * /mnt/kaggle_data/topcv/run_daily.sh >> /mnt/kaggle_data/logs/topcv_pipeline.log 2>&1
-```
+## Schedule (Airflow — không dùng cron)
+Daily 00:00 UTC = 07:00 ICT qua DAG `jobs_daily`
+(`dags/jobs_daily.py`, task `run_topcv`). Trigger tay trên Airflow UI.
 
 ## Dependencies
 - playwright

@@ -1,11 +1,11 @@
 # Infrastructure
 
-Grafana + PostgreSQL for job market dashboards.
+PostgreSQL + Grafana + Airflow (scheduler duy nhất, không dùng cron).
 
 ## Quick Start
 
 ```bash
-# Start services
+# Start all services (postgres, grafana, airflow-db, scheduler, webserver)
 cd infra
 docker compose up -d
 
@@ -15,12 +15,14 @@ docker compose ps
 # View logs
 docker compose logs -f grafana
 docker compose logs -f postgres
+docker compose logs -f airflow-scheduler
 ```
 
 ## Access
 
 | Service  | URL                      | Credentials       |
 |----------|--------------------------|-------------------|
+| Airflow  | http://localhost:8080     | admin / admin     |
 | Grafana  | http://localhost:3000     | admin / admin     |
 | Postgres | localhost:5432           | pipeline / pipeline_dev_2024 |
 
@@ -42,6 +44,12 @@ python -m pipeline.db status
 
 - **ITviec Overview**: http://localhost:3000/d/itviec-overview
 - Auto-provisioned from `grafana/dashboards/overview.json`
+
+## Airflow DAG
+
+- **DAG**: `jobs_daily` (dags/jobs_daily.py), schedule `0 0 * * *`
+- Trigger tay: Airflow UI → `jobs_daily` → Trigger DAG
+- Task logs: UI → task `run_itviec` / `run_topcv` → Logs
 
 ## Stop Services
 
