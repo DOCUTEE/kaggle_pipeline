@@ -14,10 +14,11 @@
 
 | Dashboard | URL |
 |-----------|-----|
-| **ITviec Dashboard** | http://100.80.131.68:8501 |
-| **TopCV Dashboard** | http://100.80.131.68:8501 |
+| **Grafana** (query Postgres: `itviec_jobs`, `topcv_jobs`) | http://100.80.131.68:3000 |
+| **Airflow** (DAG `jobs_daily`) | http://100.80.131.68:8080 |
 
-> [Open Dashboard →](http://100.80.131.68:8501)
+> Dữ liệu phân tích được query trực tiếp từ **PostgreSQL** — không còn file CSV
+> và không còn app Streamlit.
 
 ---
 
@@ -30,15 +31,15 @@
 │                                                         │
 │  ┌──────────┐    ┌──────────┐    ┌──────────┐          │
 │  │  SCRAPE   │───▶│ PROCESS  │───▶│ DASHBOARD│          │
-│  │ itviec +  │    │ Clean +  │    │ Streamlit│          │
-│  │ topcv.vn  │    │ Engineer │    │ + Plotly │          │
+│  │ itviec +  │    │ Clean +  │    │ HTML +   │          │
+│  │ topcv.vn  │    │ Engineer │    │ Plotly   │          │
 │  └──────────┘    └──────────┘    └──────────┘          │
-│       │                                  │              │
-│       ▼                                  ▼              │
-│  ┌──────────┐                    ┌──────────┐          │
-│  │ Raw Data │                    │  Kaggle  │          │
-│  │ CSV/JSON │                    │  Push    │          │
-│  └──────────┘                    └──────────┘          │
+│       │               │                  │              │
+│       ▼               ▼                  ▼              │
+│  ┌──────────┐   ┌───────────┐    ┌──────────────┐      │
+│  │ Raw JSON │   │ Postgres  │    │ Kaggle Push  │      │
+│  │ snapshot │   │ → Grafana │    │ (JSON)       │      │
+│  └──────────┘   └───────────┘    └──────────────┘      │
 │                                                         │
 │  Server: 100.80.131.68 (Ubuntu 24.04, 8GB RAM)         │
 │  Storage: /mnt/kaggle_data/ (783GB)                     │
@@ -50,30 +51,35 @@
 ## 📁 Project Structure
 
 ```
-/mnt/kaggle_data/
-├── itviec/                         # ITviec scraper
-│   ├── client.py
-│   ├── parser.py
-│   ├── models.py
-│   └── ...
+kaggle_pipeline/
+├── pipeline/                       # Unified pipeline — 1 pattern cho mọi source
+│   ├── cli.py / __main__.py        #   entrypoint: python -m pipeline run itviec|topcv|all
+│   ├── runner.py                   #   6 bước, source-agnostic (không if source == ...)
+│   ├── settings.py                 #   config duy nhất (env-overridable)
+│   ├── db.py                       #   1 loader Postgres generic (theo DbSpec)
+│   ├── kaggle_check.py             #   preflight creds trước khi push
+│   ├── core/                       #   hạ tầng dùng chung, không biết gì về source
+│   │   ├── contracts.py            #     ScrapeResult / ProcessResult / DbSpec / BaseSource
+│   │   ├── snapshot.py             #     ghi raw: atomic + dedup + *_latest
+│   │   ├── transform.py            #     schema chuẩn + derived features + skill taxonomy
+│   │   ├── dashboard.py            #     1 HTML shell + chart primitives
+│   │   └── publish.py              #     staging + push Kaggle
+│   └── sources/                    #   adapter: base.py (contract), itviec.py, topcv.py
 │
-├── topcv/                          # TopCV scraper (NEW)
-│   ├── scraper/
-│   │   ├── __init__.py
-│   │   └── topcv_scraper.py        # Playwright-based scraper
-│   ├── pipeline/
-│   │   ├── __init__.py
-│   │   ├── config.py               # Configuration
-│   │   └── daily_pipeline.py       # Daily orchestration
-│   ├── dashboard/
-│   │   └── app.py                  # Streamlit dashboard
-│   ├── data/
-│   │   └── raw/topcv/              # Scraped data
-│   └── requirements.txt
+├── itviec/                         # ITviec scraper package (requests + BS4)
+├── scraper/topcv_scraper.py        # TopCV scraper (Playwright, bypass Cloudflare)
 │
-└── logs/                           # Shared logs
-    └── topcv_pipeline.log
+├── dags/jobs_daily.py              # Airflow DAG — scheduler DUY NHẤT (00:00 UTC)
+├── infra/                          # docker compose: postgres + grafana + airflow
+├── deploy/                         # deploy thủ công lên server
+├── scripts/run_pipeline.sh         # chạy tay / debug (không schedule)
+├── tests/                          # unittest offline: core + contract + runner (CI chạy trước khi deploy)
+└── data/                           # raw JSON snapshot + processed_jobs.json (<source>/...)
 ```
+
+> Mỗi source chỉ khai báo `pipeline/sources/<ten>.py` (6 method); storage,
+> transform, dashboard, db, publish đều dùng chung ở `pipeline/core/`.
+> Chi tiết: `docs/PIPELINE_PATTERN.md`.
 
 ---
 
@@ -85,7 +91,7 @@
 # 1. Dev ở local
 cd /Users/quangnguyen/startup/kaggle_pipeline
 source .venv/bin/activate
-python pipeline/daily_pipeline.py  # Test locally
+python -m pipeline run itviec --max-pages 2 --no-kaggle   # test nhanh
 
 # 2. Push code lên server
 ./deploy/push_to_server.sh
@@ -105,11 +111,11 @@ uv run playwright install chromium
 uv add <package>            # hoặc sửa tay pyproject.toml + uv sync
 uv export --frozen --format requirements-txt --no-hashes -o requirements.txt  # giữ cho deploy server (pip)
 
-# Run scraper
-uv run python pipeline/daily_pipeline.py
+# Run scraper (full 6 bước)
+uv run python -m pipeline run topcv
 
-# Run dashboard
-uv run streamlit run dashboard/app.py --server.port 8501
+# Xem dữ liệu: query Postgres qua Grafana
+cd infra && docker compose up -d   # Grafana: http://localhost:3000
 ```
 
 ### Server Management
@@ -118,21 +124,21 @@ uv run streamlit run dashboard/app.py --server.port 8501
 # SSH to server
 ssh docutee@100.80.131.68
 
-# Navigate to topcv pipeline
-cd /mnt/kaggle_data/topcv
+# Navigate to pipeline repo
+cd /mnt/kaggle_data/kaggle_pipeline
 
 # Activate venv
 source .venv/bin/activate
 
 # Run scraper manually
-python pipeline/daily_pipeline.py
+python -m pipeline run itviec --data-dir /mnt/kaggle_data/itviec --load-db
+python -m pipeline run topcv  --data-dir /mnt/kaggle_data/raw/topcv --load-db
 
 # View logs
-tail -f /mnt/kaggle_data/logs/topcv_pipeline.log
+tail -f logs/pipeline_*.log
 
-# Restart dashboard
-pkill -f streamlit
-streamlit run dashboard/app.py --server.port 8501 --server.address 0.0.0.0 --server.headless true &
+# Xem dữ liệu (Grafana query Postgres)
+docker compose -f infra/docker-compose.yml up -d
 ```
 
 ---
@@ -176,10 +182,11 @@ streamlit run dashboard/app.py --server.port 8501 --server.address 0.0.0.0 --ser
 
 ### Directory Layout
 ```
-/mnt/kaggle_data/           # Main data partition
-├── itviec/                 # ITviec pipeline
-├── topcv/                  # TopCV pipeline
-└── logs/                   # Shared logs
+/mnt/kaggle_data/                  # Main data partition
+├── kaggle_pipeline/               # Repo code (rsync từ CI)
+├── itviec/                        # Raw output ITviec
+├── raw/topcv/                     # Raw output TopCV
+└── logs/                          # Shared logs
 ```
 
 ### Airflow Schedule (scheduler duy nhất, không dùng cron)
@@ -198,10 +205,11 @@ streamlit run dashboard/app.py --server.port 8501 --server.address 0.0.0.0 --ser
 ./deploy/setup_server.sh
 ```
 
-### Streamlit Dashboard
-- **Status**: Running on port 8501
-- **URL**: http://100.80.131.68:8501
-- **Process**: `streamlit run dashboard/app.py --server.port 8501 --server.address 0.0.0.0`
+### Grafana Dashboard (query Postgres)
+- **URL**: http://100.80.131.68:3000 (admin/admin)
+- **Nguồn dữ liệu**: PostgreSQL `kaggle_pipeline` — bảng `itviec_jobs`, `topcv_jobs`
+- **Pipeline nạp DB**: `python -m pipeline run <source> --load-db`
+- **Auto-provision**: `infra/grafana/dashboards/overview.json`
 
 ### Manual Commands
 ```bash
@@ -209,14 +217,14 @@ streamlit run dashboard/app.py --server.port 8501 --server.address 0.0.0.0 --ser
 ssh docutee@100.80.131.68
 
 # Run TopCV scraper
-cd /mnt/kaggle_data/topcv && source .venv/bin/activate && python pipeline/daily_pipeline.py
+cd /mnt/kaggle_data/kaggle_pipeline && source .venv/bin/activate \
+  && python -m pipeline run topcv --data-dir /mnt/kaggle_data/raw/topcv --load-db
 
 # View logs
-tail -f /mnt/kaggle_data/logs/topcv_pipeline.log
+tail -f logs/pipeline_topcv_$(date +%F).log
 
-# Restart dashboard
-pkill -f streamlit
-cd /mnt/kaggle_data/topcv && source .venv/bin/activate && streamlit run dashboard/app.py --server.port 8501 --server.address 0.0.0.0 --server.headless true &
+# Query dữ liệu
+docker exec -it kaggle_postgres psql -U pipeline -d kaggle_pipeline -c "SELECT COUNT(*) FROM itviec_jobs;"
 ```
 
 ---
@@ -281,6 +289,8 @@ chmod 600 ~/.kaggle/kaggle.json
 
 | Principle | Implementation |
 |-----------|---------------|
+| **One pattern per source** | Mỗi source chỉ implement 6 method trong `pipeline/sources/<ten>.py`; storage/transform/dashboard/db/publish dùng chung ở `pipeline/core/`. Runner không có `if source == ...` |
+| **Conformed schema** | Cả 2 nguồn ra `processed_jobs.json` cùng cột core (`job_id, title, company, salary, location_clean, skills, seniority, posted_hours_ago, skill_categories, ...`) → join/so sánh chéo được |
 | **Respect robots.txt** | Verified allowed; polite rate limiting with jitter |
 | **Cloudflare bypass** | Playwright browser automation |
 | **Atomic writes** | Temp file + `os.replace()` prevents corruption |
@@ -296,7 +306,7 @@ chmod 600 ~/.kaggle/kaggle.json
 | **Playwright not working** | `playwright install chromium` |
 | **0 jobs scraped** | Check if topcv.vn blocked; may need to update selectors |
 | **Kaggle auth failed** | Re-generate API key at kaggle.com/settings/api |
-| **Dashboard not accessible** | Check port 8501 is open; `ps aux | grep streamlit` |
+| **Grafana không có dữ liệu** | Chạy `--load-db`; kiểm tra `docker compose ps` (postgres healthy) |
 | **Disk full** | Old data auto-cleaned after 30 days |
 
 ---
@@ -310,5 +320,5 @@ MIT License — use freely, attribution appreciated.
 ## 🙏 Credits
 
 - Data sources: [itviec.com](https://itviec.com), [topcv.vn](https://topcv.vn)
-- Dashboard: [Streamlit](https://streamlit.io/), [Plotly](https://plotly.com/python/)
+- Dashboard: [Grafana](https://grafana.com/) (query Postgres), [Plotly](https://plotly.com/python/) (HTML tĩnh)
 - Scraping: [Playwright](https://playwright.dev/), [BeautifulSoup4](https://www.crummy.com/software/BeautifulSoup/)

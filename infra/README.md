@@ -26,18 +26,16 @@ docker compose logs -f airflow-scheduler
 | Grafana  | http://localhost:3000     | admin / admin     |
 | Postgres | localhost:5432           | pipeline / pipeline_dev_2024 |
 
+> Toàn bộ credentials lấy từ `infra/.env` (copy từ `.env.example`).
+> Đổi password ở **một chỗ** — Postgres, Grafana datasource và Airflow đều đọc cùng env.
+
 ## Load Data
 
 ```bash
-# From project root
-python -m pipeline.build process itviec --data-dir data/itviec_v4
-python -m pipeline.build load-db itviec --data-dir data/itviec_v4
-
-# Or combined
-python -m pipeline.build all itviec --data-dir data/itviec_v4 --load-db
-
-# Check DB status
-python -m pipeline.db status
+# From project root — 1 entrypoint duy nhất (process + dashboard + [load_db] + kaggle + cleanup)
+python -m pipeline run itviec --load-db
+python -m pipeline run topcv  --load-db
+python -m pipeline run all    --load-db
 ```
 
 ## Dashboards

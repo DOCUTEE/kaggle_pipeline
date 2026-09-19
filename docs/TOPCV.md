@@ -3,26 +3,17 @@
 ## Overview
 Scrapes IT job listings from topcv.vn using Playwright to bypass Cloudflare protection.
 
-## Location
-- **Server**: `/mnt/kaggle_data/topcv/`
-- **Local**: `/Users/quangnguyen/startup/kaggle_pipeline/`
+Adapter: `pipeline/sources/topcv.py` (bọc `scraper/topcv_scraper.py` theo `BaseSource`).
 
 ## Files
 
 ```
-topcv/
-├── scraper/
-│   ├── __init__.py
-│   └── topcv_scraper.py        # Main scraper
-├── pipeline/
-│   ├── __init__.py
-│   ├── config.py               # Configuration
-│   └── daily_pipeline.py       # Daily orchestration
-├── dashboard/
-│   └── app.py                  # Streamlit dashboard
-├── data/
-│   └── raw/topcv/              # Output data
-└── requirements.txt
+scraper/
+└── topcv_scraper.py            # Main scraper (Playwright)
+pipeline/
+├── sources/topcv.py            # Adapter cho runner
+└── settings.py                 # Config (SOURCES["topcv"])
+data/raw/topcv/                 # Output data (mặc định): raw JSON + dashboard/processed_jobs.json
 ```
 
 > Schedule duy nhất là Airflow DAG `jobs_daily` (không dùng cron).
@@ -32,25 +23,24 @@ topcv/
 
 ### Run Scraper
 ```bash
-cd /mnt/kaggle_data/topcv
+cd /mnt/kaggle_data/kaggle_pipeline
 source .venv/bin/activate
-python pipeline/daily_pipeline.py
+python -m pipeline run topcv --max-pages 5   # bỏ --max-pages để scrape 50 pages
 ```
 
-### Run Dashboard
+### Xem dữ liệu
+Không còn app Streamlit — query Postgres qua Grafana (http://localhost:3000):
+
 ```bash
-cd /mnt/kaggle_data/topcv
-source .venv/bin/activate
-streamlit run dashboard/app.py --server.port 8501 --server.address 0.0.0.0 --server.headless true
+python -m pipeline run topcv --load-db
 ```
 
 ## Data Output
 
 ### Files
-- `topcv_jobs_YYYYMMDD_HHMMSS.csv` - Timestamped CSV
-- `topcv_jobs_YYYYMMDD_HHMMSS.json` - Timestamped JSON
-- `topcv_jobs_latest.csv` - Latest CSV (for dashboard)
-- `topcv_jobs_latest.json` - Latest JSON (for dashboard)
+- `topcv_jobs_YYYYMMDD_HHMMSS.json` — snapshot raw (đầy đủ kiểu dữ liệu)
+- `topcv_jobs_latest.json` — bản mới nhất (input của bước process)
+- `dashboard/processed_jobs.json` — schema chuẩn, nạp Postgres + publish Kaggle
 
 ### Fields
 | Field | Description |
@@ -68,13 +58,8 @@ streamlit run dashboard/app.py --server.port 8501 --server.address 0.0.0.0 --ser
 
 ## Configuration
 
-Edit `pipeline/config.py`:
-```python
-KAGGLE_USERNAME = "docutee"
-KAGGLE_DATASET_NAME = "topcv-it-jobs-vietnam"
-SCRAPE_MAX_PAGES = 50
-SCRAPE_HEADLESS = True
-```
+Sửa `pipeline/settings.py` (entry `SOURCES["topcv"]`) hoặc override bằng env:
+`TOPCV_KAGGLE_DATASET`, `TOPCV_RAW_SUBDIR`, `DATA_ROOT`.
 
 ## Schedule (Airflow — không dùng cron)
 Daily 00:00 UTC = 07:00 ICT qua DAG `jobs_daily`
@@ -85,6 +70,6 @@ Daily 00:00 UTC = 07:00 ICT qua DAG `jobs_daily`
 - beautifulsoup4
 - lxml
 - pandas
-- streamlit
 - plotly
+- psycopg2-binary
 - kaggle

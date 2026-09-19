@@ -32,15 +32,27 @@ CREATE TABLE IF NOT EXISTS topcv_jobs (
     company         TEXT,
     salary          TEXT,
     location        TEXT,
+    location_clean  TEXT,
     experience      TEXT,
     level           TEXT,
+    seniority       TEXT,
     skills          TEXT,
+    skill_categories JSONB DEFAULT '[]'::jsonb,
+    num_skills      INT DEFAULT 0,
     url             TEXT,
     is_hot          BOOLEAN DEFAULT FALSE,
     posted_date     TEXT,
+    posted_hours_ago FLOAT,
     scrape_date     TEXT,
     loaded_at       TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Cột dùng chung (derived ở pipeline/core/transform.py) thêm cho DB đã tạo trước đó.
+ALTER TABLE topcv_jobs ADD COLUMN IF NOT EXISTS location_clean TEXT;
+ALTER TABLE topcv_jobs ADD COLUMN IF NOT EXISTS seniority TEXT;
+ALTER TABLE topcv_jobs ADD COLUMN IF NOT EXISTS skill_categories JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE topcv_jobs ADD COLUMN IF NOT EXISTS num_skills INT DEFAULT 0;
+ALTER TABLE topcv_jobs ADD COLUMN IF NOT EXISTS posted_hours_ago FLOAT;
 
 -- Indexes for common queries
 CREATE INDEX IF NOT EXISTS idx_itviec_location ON itviec_jobs(location_clean);
@@ -48,6 +60,8 @@ CREATE INDEX IF NOT EXISTS idx_itviec_seniority ON itviec_jobs(seniority);
 CREATE INDEX IF NOT EXISTS idx_itviec_company ON itviec_jobs(company);
 CREATE INDEX IF NOT EXISTS idx_itviec_scraped ON itviec_jobs(scraped_at);
 CREATE INDEX IF NOT EXISTS idx_topcv_location ON topcv_jobs(location);
+CREATE INDEX IF NOT EXISTS idx_topcv_location_clean ON topcv_jobs(location_clean);
+CREATE INDEX IF NOT EXISTS idx_topcv_seniority ON topcv_jobs(seniority);
 CREATE INDEX IF NOT EXISTS idx_topcv_company ON topcv_jobs(company);
 
 -- Views for dashboard queries

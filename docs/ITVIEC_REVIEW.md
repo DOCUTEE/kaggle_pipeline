@@ -3,6 +3,10 @@
 Ngày: 2026-09-14
 Phạm vi: `itviec_scraper.py` (322 dòng) — scraper 1 file, lưu CSV/JSON.
 
+> **Lưu trữ lịch sử (2026-09-20):** `itviec_scraper.py` đã bị xoá. Các khuyến nghị
+> trong review này đã được hiện thực ở package `itviec/` (client/parser/storage/runner)
+> + adapter `pipeline/sources/itviec.py`. Giữ file này làm ghi chép thiết kế.
+
 ## Tóm tắt (Executive Summary)
 
 Code **chạy được và đúng**, đã thu được 765 jobs, nhưng nó là một **script, không phải pipeline dữ liệu**. Với nhu cầu "thu thập toàn bộ job" một lần thì ổn; với nhu cầu *chạy định kỳ, theo dõi chênh lệch job, scale nhiều nguồn* thì có 10 vấn đề khối cấu trúc dưới đây. Refactor ở phần sau giải quyết toàn bộ bằng kiến trúc plugin + idempotent storage + backoff/retry + batching + schema validation + atomic write.

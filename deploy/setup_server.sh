@@ -57,35 +57,23 @@ sleep 20
 docker compose ps
 EOF
 
-# 4. Start dashboard
-echo "[4/5] Starting dashboard..."
+# 4. Host venv (chỉ để chạy tay `python -m pipeline run ...`; pipeline thật chạy trong Airflow container)
+echo "[4/5] Preparing host venv..."
 sshpass -p "${SERVER_PASS}" ssh -o StrictHostKeyChecking=no ${SERVER_USER}@${SERVER_IP} << 'EOF'
-# Kill existing streamlit ([s] trick tránh pkill tự match shell cha)
-pkill -f '[s]treamlit run dashboard' 2>/dev/null || true
-sleep 2
-
-# Start dashboard
 cd /mnt/kaggle_data/kaggle_pipeline
 source .venv/bin/activate 2>/dev/null || python3 -m venv .venv && source .venv/bin/activate
 pip install --upgrade pip -q
 pip install -r requirements.txt -q
 playwright install chromium 2>/dev/null || true
-# setsid + nohup: detach hẳn khỏi SSH session (môi trường không pty)
-setsid nohup .venv/bin/streamlit run dashboard/app.py \
-    --server.port 8501 \
-    --server.address 0.0.0.0 \
-    --server.headless true \
-    > /mnt/kaggle_data/logs/streamlit.log 2>&1 </dev/null &
-disown
-sleep 10
-ss -ltn | grep 8501 && echo "Dashboard started on port 8501!"
+# Dọn tiến trình Streamlit cũ (dashboard đã bỏ — dữ liệu query qua Postgres/Grafana)
+pkill -f '[s]treamlit run dashboard' 2>/dev/null || true
 EOF
 
 echo ""
 echo "=========================================="
-echo "Setup Complete (Airflow-only)!"
+echo "Setup Complete (Airflow + Grafana)!"
 echo "=========================================="
 echo "Airflow UI: http://${SERVER_IP}:8080 (admin/admin — đổi sau lần đầu)"
 echo "DAG: jobs_daily (schedule 00:00 UTC = 07:00 ICT, trigger tay trên UI)"
-echo "Dashboard: http://${SERVER_IP}:8501"
+echo "Grafana:    http://${SERVER_IP}:3000 (admin/admin) — query trực tiếp Postgres"
 echo "SSH: ssh ${SERVER_USER}@${SERVER_IP}"

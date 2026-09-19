@@ -34,14 +34,11 @@ say "triggered"
 say "5/6 deps check..."
 docker exec kaggle_airflow_scheduler python -c "import pandas, kaggle; print('deps OK')" >>"$LOG" 2>&1
 
-say "6/6 dashboard..."
+say "6/6 dashboard (Grafana) + don Streamlit cu..."
 pkill -f "streamlit run" 2>/dev/null || true
-sleep 2
-cd "$REPO" && [ -d .venv ] || python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt -q >>"$LOG" 2>&1
-nohup streamlit run dashboard/app.py --server.port 8501 --server.address 0.0.0.0 --server.headless true > /mnt/kaggle_data/logs/streamlit.log 2>&1 &
+docker compose -f "$REPO/infra/docker-compose.yml" up -d >>"$LOG" 2>&1
 sleep 10
-curl -s -o /dev/null -w "dashboard HTTP %{http_code}\n" --max-time 10 http://localhost:8501/ | tee -a "$LOG"
+curl -s -o /dev/null -w "grafana HTTP %{http_code}\n" --max-time 10 http://localhost:3000/api/health | tee -a "$LOG"
+curl -s -o /dev/null -w "airflow HTTP %{http_code}\n" --max-time 10 http://localhost:8080/health | tee -a "$LOG"
 
-say "DONE — Airflow UI: http://100.80.131.68:8080 | Dashboard: http://100.80.131.68:8501"
+say "DONE — Airflow UI: http://100.80.131.68:8080 | Grafana: http://100.80.131.68:3000 (query Postgres)"

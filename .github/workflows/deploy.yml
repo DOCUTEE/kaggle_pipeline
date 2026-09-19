@@ -86,7 +86,7 @@ jobs:
             --exclude='data/' \
             ./ ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:/mnt/kaggle_data/kaggle_pipeline/
 
-      - name: Restart infra + dashboard on server
+      - name: Restart infra on server
         env:
           SSHPASS: ${{ secrets.SERVER_PASSWORD }}
         run: |
@@ -94,19 +94,12 @@ jobs:
             ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} << 'EOF'
           set -e
           cd /mnt/kaggle_data/kaggle_pipeline
-          # infra (docutee đã trong group docker nên không cần sudo/password)
+          # infra: postgres + grafana + airflow (docutee đã trong group docker nên không cần sudo)
           docker compose -f infra/docker-compose.yml up -d
-          # dashboard venv
+          # venv trên host chỉ để chạy tay `python -m pipeline run ...` (pipeline thật chạy trong Airflow container)
           source .venv/bin/activate 2>/dev/null || python3 -m venv .venv
           pip install -q -r requirements.txt
-          pkill -f '[s]treamlit run dashboard' 2>/dev/null || true
-          sleep 2
-          setsid nohup .venv/bin/streamlit run dashboard/app.py \
-            --server.port 8501 --server.address 0.0.0.0 --server.headless true \
-            > /mnt/kaggle_data/logs/streamlit.log 2>&1 </dev/null &
-          disown
-          sleep 10
-          ss -ltn | grep 8501 && echo DASHBOARD_OK
+          docker compose -f infra/docker-compose.yml ps
           EOF
 
       - name: Health check
@@ -115,4 +108,4 @@ jobs:
         run: |
           sshpass -e ssh -o StrictHostKeyChecking=no -o ConnectTimeout=20 \
             ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} \
-            "curl -s -o /dev/null -w 'airflow:%{http_code} ' --max-time 20 http://localhost:8080/health; curl -s -o /dev/null -w 'dash:%{http_code}\n' --max-time 20 http://localhost:8501/"
+            "curl -s -o /dev/null -w 'airflow:%{http_code} ' --max-time 20 http://localhost:8080/health; curl -s -o /dev/null -w 'grafana:%{http_code}\n' --max-time 20 http://localhost:3000/api/health"

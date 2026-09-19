@@ -7,33 +7,72 @@ schedule duy nhất bằng **Airflow DAG `jobs_daily`** (không dùng cron):
 scrape → process → dashboard → [load_db] → kaggle_push → cleanup
 ```
 
+Từ 2026-09-20, pattern được áp xuống **tận tầng implementation**: không chỉ
+orchestration giống nhau, mà cả storage / transform / dashboard / db / publish
+đều dùng chung 1 bộ code trong `pipeline/core/`.
+
 ## Sơ đồ
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│  dags/jobs_daily.py              (Airflow scheduler duy nhất) │
-│  uv run python -m pipeline run <source> (chạy tay / debug)           │
-│  scripts/run_pipeline.sh         (chạy tay, KHÔNG schedule)   │
-└─────────────────────────┬────────────────────────────────────┘
-                          ▼
-             pipeline/runner.py::run_one()
-                          │
-   ┌──────────────────────┼──────────────────────────────────┐
-   ▼                      ▼                                  ▼
- scrape              process/dashboard              load_db/kaggle/cleanup
- (adapter)           (pipeline/build.py)            (pipeline/db.py + build.py)
-   │
-   ▼
- pipeline/sources/<ten>.py  (implement BaseSource)
- pipeline/sources/base.py   (contract ScrapeResult)
- pipeline/settings.py       (config duy nhất, env-overridable)
+┌───────────────────────────────────────────────────────────────────┐
+│  dags/jobs_daily.py                (Airflow scheduler duy nhất)   │
+│  python -m pipeline run <source>   (chạy tay / debug)             │
+│  scripts/run_pipeline.sh           (chạy tay, KHÔNG schedule)     │
+└──────────────────────────────┬────────────────────────────────────┘
+                               ▼
+                  pipeline/runner.py::run_one()
+        (6 bước, KHÔNG có if source == ... — source-agnostic)
+                               │
+                               ▼
+                  pipeline/sources/<ten>.py   ← implement BaseSource
+                               │
+       ┌───────────────────────┼────────────────────────┐
+       ▼                       ▼                        ▼
+  pipeline/core/snapshot   pipeline/core/transform   pipeline/core/dashboard
+  (atomic, dedup, latest)  (schema chuẩn + derived)  (1 shell + chart specs)
+                               │
+                               ▼
+                     pipeline/db.py (loader generic theo DbSpec)
+                     pipeline/core/publish.py (staging + Kaggle)
 ```
+
+Mỗi source implement đúng 6 method:
+
+| Method | Trách nhiệm | Code dùng chung |
+|---|---|---|
+| `scrape()` | scrape + ghi raw snapshot | `core/snapshot.py` |
+| `process()` | raw → processed JSON | `core/transform.py` |
+| `dashboard()` | processed → HTML | `core/dashboard.py` |
+| `db_spec()` / `load_db()` | nạp Postgres | `pipeline/db.py` |
+| `staging_files()` | file publish Kaggle | `core/publish.py` |
+
+## Schema chuẩn (conformed)
+
+Cả 2 nguồn ra **cùng tên file `processed_jobs.json`** với cùng cột core
+(khai báo ở `pipeline/core/transform.py::PROCESSED_CORE_FIELDS`).
+Dùng JSON thay CSV để giữ đúng kiểu dữ liệu (list/bool/số); dữ liệu phân tích
+được query từ Postgres:
+
+```
+job_id, title, company, url, salary, location, location_clean,
+skills, num_skills, skill_categories, seniority,
+posted_date, posted_hours_ago, scraped_at, source
+```
+
+Cột đặc thù của từng nguồn vẫn được giữ thêm phía sau (itviec: `working_type`,
+`label`, `job_function`, `highlights`; topcv: `is_hot`, `level`, `experience`,
+`category`, `deadline`), nên vẫn join/so sánh chéo 2 nguồn được.
+
+Snapshot raw cũ (`job_key`/`tags`/`posted_time`) vẫn process được nhờ
+`LEGACY_ALIASES` trong `core/transform.py`.
 
 ## Thêm nguồn mới (vd `topdev`)
 
-1. Tạo `pipeline/sources/topdev.py` implement `scrape(data_dir, ...)` trả `ScrapeResult`.
+1. Tạo `pipeline/sources/topdev.py` implement đủ 6 method của `BaseSource`
+   (xem `docs/PIPELINE_PATTERN` + `tests/test_runner.py::StubSource` làm mẫu).
 2. Đăng ký 1 dòng trong `pipeline/sources/__init__.py` + 1 entry trong `pipeline/settings.py::SOURCES`.
-3. Xong — CLI/DAG tự nhận source mới, không sửa gì thêm.
+3. Xong — CLI/DAG/dashboard/db tự nhận source mới.
+   `tests/test_sources.py` sẽ fail nếu thiếu bước nào.
 
 ## Vận hành chuẩn (Airflow)
 
@@ -67,13 +106,17 @@ PROJECT_ROOT=/mnt/kaggle_data/kaggle_pipeline DATA_ROOT=/mnt/kaggle_data \
   uv run python -m pipeline run itviec --load-db
 ```
 
-## File legacy (vẫn chạy, nhưng không phát triển thêm)
+## Entrypoint duy nhất
 
-| File | Thay bằng |
-|---|---|
-| `pipeline/daily_pipeline.py` (topcv-only) | `uv run python -m pipeline run topcv` |
-| `pipeline/config.py` | `pipeline/settings.py` (file này giờ là shim re-export) |
+Toàn bộ code legacy đã bị xoá (2026-09-20): `pipeline/daily_pipeline.py`,
+`pipeline/config.py`, `pipeline/build.py`, `itviec/storage.py`, `itviec_scraper.py`,
+`cli.py`, `itviec/__main__.py`, `kaggle_config/`. Chỉ còn **1 entrypoint**:
 
+```bash
+uv run python -m pipeline run itviec|topcv|all [--load-db] [--no-kaggle]
+```
+
+Không còn CLI `python -m pipeline.build`, `python -m pipeline.db`, `python -m itviec`.
 Cron đã gỡ hoàn toàn: `scripts/daily_pipeline.sh` và `run_daily.sh` trên server
 đã xóa, `deploy/setup_server.sh` tự gỡ crontab cũ khi deploy.
 
@@ -82,3 +125,13 @@ Cron đã gỡ hoàn toàn: `scripts/daily_pipeline.sh` và `run_daily.sh` trên
 `pipeline/settings.py` + env: `PROJECT_ROOT, DATA_ROOT, LOG_DIR, KAGGLE_USERNAME,`
 `ITVIEC_KAGGLE_DATASET, TOPCV_KAGGLE_DATASET, DB_*, PIPELINE_SOURCES, PIPELINE_LOAD_DB`.
 Local và server chỉ khác env.
+
+## Test chốt pattern
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+- `test_sources.py` — mọi source implement đủ 6 method, DbSpec khớp schema, runner không rẽ nhánh theo source.
+- `test_runner.py` — đăng ký 1 source GIẢ rồi chạy `run_one()`; nếu runner còn hard-code itviec/topcv thì fail.
+- `test_core.py` — transform/db-spec/dashboard/snapshot dùng chung.

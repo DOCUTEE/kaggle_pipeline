@@ -4,11 +4,13 @@ datasources:
   - name: PostgreSQL
     type: postgres
     access: proxy
+    # Giá trị lấy từ env của container grafana (xem infra/docker-compose.yml) —
+    # đổi password chỉ cần sửa infra/.env, không sửa file này.
     url: postgres:5432
-    database: kaggle_pipeline
-    user: pipeline
+    database: ${POSTGRES_DB}
+    user: ${POSTGRES_USER}
     secureJsonData:
-      password: pipeline_dev_2024
+      password: ${POSTGRES_PASSWORD}
     jsonData:
       sslmode: disable
       maxOpenConns: 10

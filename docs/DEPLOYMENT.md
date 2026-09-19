@@ -23,7 +23,7 @@ ssh docutee@100.80.131.68
 
 ## Deploy
 ```bash
-# Từ local: sync code + gỡ cron cũ + dựng infra + start dashboard
+# Từ local: sync code + gỡ cron cũ + dựng infra (postgres + grafana + airflow)
 ./deploy/setup_server.sh
 ```
 
@@ -55,7 +55,7 @@ Workflow `.github/workflows/deploy.yml` chạy mỗi khi push lên `main` qua 2 
    (Python 3.12 khớp server, offline, ~15s). Đỏ thì deploy không bao giờ chạy.
 2. **deploy** (`needs: [test]`) — rsync code (trừ `data/` + `logs/` + `.venv`
    để không đè mất dataset server đang cào) → `docker compose up -d` →
-   reinstall deps → restart Streamlit → health check `:8080` + `:8501`.
+   reinstall deps → `docker compose up -d` → health check Airflow `:8080` + Grafana `:3000`.
 
 Chạy test ở local trước khi push: `python -m unittest discover -s tests -v`.
 Bỏ qua 1 lần deploy: thêm `[skip deploy]` vào commit message (thêm
@@ -88,14 +88,16 @@ python -m pipeline run itviec --load-db
 python -m pipeline run topcv --max-pages 5 --no-kaggle
 ```
 
-### Dashboard
+### Dashboard (Grafana — query Postgres)
+
+Không còn app Streamlit: dữ liệu phân tích query trực tiếp từ PostgreSQL
+(`itviec_jobs`, `topcv_jobs`).
+
 ```bash
-cd /mnt/kaggle_data/kaggle_pipeline
-source .venv/bin/activate
-streamlit run dashboard/app.py --server.port 8501 --server.address 0.0.0.0 --server.headless true
+cd /mnt/kaggle_data/kaggle_pipeline/infra && docker compose up -d
 ```
 
-Access at: http://100.80.131.68:8501
+Access at: http://100.80.131.68:3000 (admin/admin)
 
 ## Kaggle Setup (push dataset)
 
@@ -141,8 +143,8 @@ python -m pipeline run topcv --max-pages 2
 ### View Logs
 ```bash
 # Airflow task logs: xem trên UI (khuyên dùng)
-# Dashboard log
-tail -f /mnt/kaggle_data/logs/streamlit.log
+# Infra logs (postgres / grafana / airflow)
+docker compose -f /mnt/kaggle_data/kaggle_pipeline/infra/docker-compose.yml logs -f grafana
 
 # Manual run logs
 tail -f /mnt/kaggle_data/kaggle_pipeline/logs/pipeline_itviec_*.log
@@ -150,23 +152,21 @@ tail -f /mnt/kaggle_data/kaggle_pipeline/logs/pipeline_itviec_*.log
 
 ### Check Processes
 ```bash
-# Check if dashboard is running
-ps aux | grep streamlit
-
 # Check infra
 cd /mnt/kaggle_data/kaggle_pipeline/infra && docker compose ps
 ```
 
 ## Troubleshooting
 
-### Dashboard not accessible
+### Grafana trống / không có dữ liệu
 ```bash
-# Check if streamlit is running
-ps aux | grep streamlit
+# Kiểm tra postgres healthy + đã nạp dữ liệu chưa
+cd /mnt/kaggle_data/kaggle_pipeline/infra && docker compose ps
+docker exec -it kaggle_postgres psql -U pipeline -d kaggle_pipeline -c "SELECT COUNT(*) FROM itviec_jobs;"
 
-# Restart dashboard
-pkill -f streamlit
-cd /mnt/kaggle_data/kaggle_pipeline && source .venv/bin/activate && streamlit run dashboard/app.py --server.port 8501 --server.address 0.0.0.0 --server.headless true &
+# Nạp lại dữ liệu từ processed JSON
+cd /mnt/kaggle_data/kaggle_pipeline && source .venv/bin/activate
+python -m pipeline run itviec --load-db
 ```
 
 ### Scraper not working
