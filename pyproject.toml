@@ -1,0 +1,34 @@
+[project]
+name = "kaggle-pipeline"
+version = "0.1.0"
+description = "Vietnam IT Job Market Pipeline + arXiv papers — Scrape → Process → Visualize → Publish"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+# Workflow: uv sync (dựng .venv từ uv.lock) — KHÔNG pip install thủ công.
+# Thêm dep: sửa list dưới → uv lock → uv sync → uv export ... -o requirements.txt
+# requirements.txt chỉ để pip/airflow-container dùng; nguồn thật là file này + uv.lock.
+# Airflow chạy qua Docker (infra/docker-compose.yml, image apache/airflow:2.9.3),
+# không pip install airflow ở local (không dùng cron — scheduler duy nhất là DAG jobs_daily).
+dependencies = [
+    "playwright>=1.40.0",
+    "beautifulsoup4>=4.12.0",
+    "requests>=2.31.0",
+    "pandas>=2.1.0",
+    "pydantic>=2.0",
+    "tenacity>=8.0",
+    "streamlit>=1.29.0",
+    "plotly>=5.18.0",
+    "kaggle>=2.0",
+    "lxml>=4.9.0",
+    "psycopg2-binary>=2.9.9",
+    "typer>=0.9.0",
+    "boto3>=1.34.0",
+    "feedparser>=6.0.0",
+]
+
+[dependency-groups]
+dev = []
+
+[tool.uv]
+package = false

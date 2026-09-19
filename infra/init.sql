@@ -83,3 +83,30 @@ FROM itviec_jobs
 WHERE scraped_at IS NOT NULL
 GROUP BY DATE(scraped_at), location_clean
 ORDER BY scrape_date DESC;
+
+-- ─── arXiv papers (PDF file -> MinIO, metadata -> Postgres) ─────────────────
+CREATE TABLE IF NOT EXISTS arxiv_papers (
+    id               SERIAL PRIMARY KEY,
+    arxiv_id         TEXT UNIQUE NOT NULL,   -- vd "2609.19146v1"
+    title            TEXT NOT NULL,
+    authors          TEXT,                   -- join bằng "; "
+    abstract         TEXT,
+    categories       TEXT,                   -- join bằng ";"
+    primary_category TEXT,
+    published        TIMESTAMPTZ,
+    updated          TIMESTAMPTZ,
+    pdf_url          TEXT,
+    pdf_local        TEXT,                   -- đường dẫn file local
+    minio_key        TEXT,                   -- key trong bucket (rỗng nếu fallback local)
+    pdf_location     TEXT,                   -- "s3://bucket/key" hoặc "file://..."
+    comment          TEXT,
+    journal_ref      TEXT,
+    doi              TEXT,
+    scrape_date      TEXT,
+    query            TEXT,
+    loaded_at        TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_arxiv_category ON arxiv_papers(primary_category);
+CREATE INDEX IF NOT EXISTS idx_arxiv_published ON arxiv_papers(published);
+CREATE INDEX IF NOT EXISTS idx_arxiv_query ON arxiv_papers(query);

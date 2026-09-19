@@ -1,0 +1,103 @@
+name: Deploy to server
+
+# Đơn giản: mỗi lần push lên main -> rsync code lên server + bật lại infra/dashboard.
+# Bỏ qua deploy nếu commit message chứa [skip deploy].
+#
+# Cần tạo 3 secrets trong GitHub repo (Settings -> Secrets and variables -> Actions):
+#   SERVER_HOST      vd 100.80.131.68 (IP Tailscale, runner cần join tailnet - xem chú thích bên dưới)
+#   SERVER_USER      vd docutee
+#   SERVER_PASSWORD  password SSH (cũng dùng cho sudo docker)
+#
+# LƯU Ý Tailscale: IP server là IP tailnet (100.x). GitHub runner mặc định KHÔNG
+# vào được tailnet, nên cần join tailnet bằng Auth key
+# (admin.tailscale.com -> Machines -> ... -> Keys -> Generate auth key):
+#   TAILSCALE_AUTHKEY (secret trên GitHub).
+# Không có secret này thì SSH tới IP tailnet sẽ fail.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # Lớp 1 — TEST: chạy toàn bộ unittest, đỏ thì deploy không bao giờ chạy.
+  test:
+    if: "!contains(github.event.head_commit.message, '[skip test]')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python 3.12 (khớp server)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -q -r requirements.txt
+
+      - name: Run unit tests (unittest, offline)
+        run: python -m unittest discover -s tests -v
+
+  # Lớp 2 — DEPLOY: chỉ chạy khi push thẳng lên main (PR chỉ test, không deploy).
+  deploy:
+    needs: [test]
+    if: "github.event_name == 'push' && !contains(github.event.head_commit.message, '[skip deploy]') && (needs.test.result == 'success' || needs.test.result == 'skipped')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Join Tailscale (để SSH được IP tailnet)
+        if: ${{ secrets.TAILSCALE_AUTHKEY != '' }}
+        uses: tailscale/github-action@v3
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+
+      - name: Install deploy tools
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass rsync
+
+      - name: Rsync code to server (trừ data/logs/venv)
+        env:
+          SSHPASS: ${{ secrets.SERVER_PASSWORD }}
+        run: |
+          sshpass -e rsync -avz --timeout=120 \
+            -e "ssh -o StrictHostKeyChecking=no -o ConnectTimeout=20" \
+            --exclude='.git' \
+            --exclude='.venv' \
+            --exclude='__pycache__' \
+            --exclude='*.pyc' \
+            --exclude='logs/' \
+            --exclude='data/' \
+            ./ ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:/mnt/kaggle_data/kaggle_pipeline/
+
+      - name: Restart infra + dashboard on server
+        env:
+          SSHPASS: ${{ secrets.SERVER_PASSWORD }}
+        run: |
+          sshpass -e ssh -o StrictHostKeyChecking=no -o ConnectTimeout=20 \
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} << 'EOF'
+          set -e
+          cd /mnt/kaggle_data/kaggle_pipeline
+          # infra (postgres/minio/grafana/airflow) - dùng sudo cho chắc
+          echo "$SSHPASS" | sudo -S docker compose -f infra/docker-compose.yml up -d
+          # dashboard venv
+          source .venv/bin/activate 2>/dev/null || python3 -m venv .venv
+          pip install -q -r requirements.txt
+          pkill -f '[s]treamlit run dashboard' 2>/dev/null || true
+          sleep 2
+          setsid nohup .venv/bin/streamlit run dashboard/app.py \
+            --server.port 8501 --server.address 0.0.0.0 --server.headless true \
+            > /mnt/kaggle_data/logs/streamlit.log 2>&1 </dev/null &
+          disown
+          sleep 10
+          ss -ltn | grep 8501 && echo DASHBOARD_OK
+          EOF
+
+      - name: Health check
+        env:
+          SSHPASS: ${{ secrets.SERVER_PASSWORD }}
+        run: |
+          sshpass -e ssh -o StrictHostKeyChecking=no -o ConnectTimeout=20 \
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} \
+            "curl -s -o /dev/null -w 'airflow:%{http_code} ' --max-time 20 http://localhost:8080/health; curl -s -o /dev/null -w 'dash:%{http_code}\n' --max-time 20 http://localhost:8501/"
