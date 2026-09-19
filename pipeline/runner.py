@@ -93,8 +93,6 @@ def run_one(source_name: str, opts: RunOptions | None = None) -> StepSummary:
 
     if source_name == "itviec":
         build_mod.process_itviec(data_dir, dashboard_dir)
-    elif source_name == "arxiv":
-        build_mod.process_arxiv(data_dir, dashboard_dir)
     else:
         build_mod.process_topcv(data_dir, dashboard_dir)
     summary.steps_ok.append("process")
@@ -102,8 +100,6 @@ def run_one(source_name: str, opts: RunOptions | None = None) -> StepSummary:
     # 3. DASHBOARD ───────────────────────────────────────────────────────
     if source_name == "itviec":
         build_mod.build_itviec_dashboard(data_dir, dashboard_dir)
-    elif source_name == "arxiv":
-        build_mod.build_arxiv_dashboard(data_dir, dashboard_dir)
     else:
         build_mod.build_topcv_dashboard(data_dir, dashboard_dir)
     summary.steps_ok.append("dashboard")
@@ -112,20 +108,12 @@ def run_one(source_name: str, opts: RunOptions | None = None) -> StepSummary:
     if opts.load_db:
         from pipeline import db as db_mod
 
-        csv_name = (
-            "processed_jobs.csv"
-            if source_name == "itviec"
-            else "processed_arxiv.csv"
-            if source_name == "arxiv"
-            else "processed_topcv.csv"
-        )
+        csv_name = "processed_jobs.csv" if source_name == "itviec" else "processed_topcv.csv"
         csv_path = dashboard_dir / csv_name
         if not csv_path.exists():
             raise FileNotFoundError(f"Processed CSV not found: {csv_path}")
         if source_name == "itviec":
             db_mod.load_itviec_csv(csv_path)
-        elif source_name == "arxiv":
-            db_mod.load_arxiv_csv(csv_path)
         else:
             db_mod.load_topcv_csv(csv_path)
         summary.steps_ok.append("load_db")
@@ -180,12 +168,6 @@ def _prepare_kaggle_staging(source: str, data_dir: Path, dashboard_dir: Path) ->
             data_dir / "itviec_jobs_latest.csv": "itviec_jobs.csv",
             data_dir / "itviec_jobs_latest.json": "itviec_jobs.json",
             dashboard_dir / "processed_jobs.csv": "processed_jobs.csv",
-        }
-    elif source == "arxiv":
-        wanted = {
-            data_dir / "arxiv_latest.csv": "arxiv_papers.csv",
-            data_dir / "arxiv_latest.json": "arxiv_papers.json",
-            dashboard_dir / "processed_arxiv.csv": "processed_arxiv.csv",
         }
     else:
         wanted = {

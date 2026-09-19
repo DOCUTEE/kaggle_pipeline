@@ -145,8 +145,6 @@ def _env_for(dataset_id: str) -> str:
     slug = dataset_id.split("/")[-1]
     if "itviec" in slug:
         return "ITVIEC_KAGGLE_DATASET"
-    if "arxiv" in slug:
-        return "ARXIV_KAGGLE_DATASET"
     return "TOPCV_KAGGLE_DATASET"
 
 
