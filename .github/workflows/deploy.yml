@@ -48,13 +48,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check required secrets (fail nhanh thay vì treo)
+        env:
+          TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTHKEY }}
+          SRV_HOST: ${{ secrets.SERVER_HOST }}
+          SRV_USER: ${{ secrets.SERVER_USER }}
+          SRV_PASS: ${{ secrets.SERVER_PASSWORD }}
+        run: |
+          missing=0
+          for v in "TS_AUTHKEY TAILSCALE_AUTHKEY" "SRV_HOST SERVER_HOST" "SRV_USER SERVER_USER" "SRV_PASS SERVER_PASSWORD"; do
+            set -- $v; [ -n "${!1}" ] || { echo "::error::Thiếu secret $2"; missing=1; }
+          done
+          exit $missing
+
       - name: Install Tailscale
         run: curl -fsSL https://tailscale.com/install.sh | sh
 
       - name: Join tailnet with authkey
         env:
           TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTHKEY }}
-        run: sudo tailscale up --authkey="$TS_AUTHKEY" --hostname=github-ci --accept-routes
+        run: sudo tailscale up --authkey="$TS_AUTHKEY" --hostname=github-ci --accept-routes --timeout=60s
 
       - name: Install deploy tools
         run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass rsync
