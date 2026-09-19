@@ -18,12 +18,6 @@ beautifulsoup4==4.15.0
     # via kaggle-pipeline
 bleach==6.4.0
     # via kaggle
-boto3==1.43.97
-    # via kaggle-pipeline
-botocore==1.43.97
-    # via
-    #   boto3
-    #   s3transfer
 certifi==2026.7.22
     # via requests
 charset-normalizer==3.5.1
@@ -38,10 +32,6 @@ colorama==0.4.6 ; sys_platform == 'win32'
     #   typer
 fastjsonschema==2.22.2
     # via nbformat
-feedparser==6.0.14
-    # via kaggle-pipeline
-feedparser-sgmllib==2.1.0
-    # via feedparser
 greenlet==3.5.6
     # via playwright
 h11==0.16.0
@@ -58,10 +48,6 @@ jinja2==3.1.6
     # via
     #   altair
     #   pydeck
-jmespath==1.1.0
-    # via
-    #   boto3
-    #   botocore
 jsonschema==4.26.0
     # via
     #   altair
@@ -140,7 +126,6 @@ pygments==2.21.0
     # via rich
 python-dateutil==2.9.0.post0
     # via
-    #   botocore
     #   kaggle
     #   pandas
 python-dotenv==1.2.3
@@ -167,8 +152,6 @@ rpds-py==2026.6.3
     # via
     #   jsonschema
     #   referencing
-s3transfer==0.19.2
-    # via boto3
 shellingham==1.5.4
     # via typer
 six==1.17.0
@@ -211,7 +194,6 @@ tzdata==2026.4 ; sys_platform == 'emscripten' or sys_platform == 'win32'
     # via pandas
 urllib3==2.8.0
     # via
-    #   botocore
     #   kaggle
     #   requests
 uvicorn==0.53.0
@@ -222,3 +204,9 @@ webencodings==0.6.1
     # via bleach
 websockets==16.1.1
     # via streamlit
+
+# NOTE: không dùng cron/schedule nữa — schedule duy nhất là Airflow DAG
+# dags/jobs_daily.py, chạy qua Docker (infra/docker-compose.yml,
+# image apache/airflow:2.9.3). Không pip install airflow ở local.
+# File này do uv export từ pyproject.toml + uv.lock — sửa deps ở pyproject.toml rồi chạy:
+#   uv sync && uv export --frozen --format requirements-txt --no-hashes -o requirements.txt
