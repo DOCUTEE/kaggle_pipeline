@@ -186,85 +186,6 @@ def load_topcv_csv(csv_path: Path) -> int:
     return inserted
 
 
-# ─── ARXIV LOADER ─────────────────────────────────────────────────────────────
-
-def load_arxiv_csv(csv_path: Path) -> int:
-    """Load arXiv processed CSV vào PostgreSQL. Returns rows inserted.
-
-    Upsert theo arxiv_id (idempotent — chạy lại không trùng).
-    """
-    print(f"\n[db] Loading arXiv data from {csv_path}")
-    df = pd.read_csv(csv_path)
-    # CSV rỗng -> pandas đọc thành NaN: chuẩn hóa về "" để DB không dính chuỗi 'NaN'
-    df = df.where(pd.notna(df), "")
-
-    conn = _get_conn()
-    cur = conn.cursor()
-
-    inserted = 0
-    for _, row in df.iterrows():
-        arxiv_id = str(row.get("arxiv_id", "")).strip()
-        if not arxiv_id:
-            continue
-        try:
-            cur.execute("""
-                INSERT INTO arxiv_papers (
-                    arxiv_id, title, authors, abstract, categories, primary_category,
-                    published, updated, pdf_url, pdf_local, minio_key, pdf_location,
-                    comment, journal_ref, doi, scrape_date, query
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (arxiv_id) DO UPDATE SET
-                    title = EXCLUDED.title,
-                    authors = EXCLUDED.authors,
-                    abstract = EXCLUDED.abstract,
-                    categories = EXCLUDED.categories,
-                    primary_category = EXCLUDED.primary_category,
-                    published = EXCLUDED.published,
-                    updated = EXCLUDED.updated,
-                    pdf_url = EXCLUDED.pdf_url,
-                    pdf_local = EXCLUDED.pdf_local,
-                    minio_key = EXCLUDED.minio_key,
-                    pdf_location = EXCLUDED.pdf_location,
-                    comment = EXCLUDED.comment,
-                    journal_ref = EXCLUDED.journal_ref,
-                    doi = EXCLUDED.doi,
-                    scrape_date = EXCLUDED.scrape_date,
-                    query = EXCLUDED.query,
-                    loaded_at = NOW()
-            """, (
-                arxiv_id,
-                row.get("title"),
-                row.get("authors"),
-                row.get("abstract"),
-                row.get("categories"),
-                row.get("primary_category"),
-                row.get("published") or None,
-                row.get("updated") or None,
-                row.get("pdf_url"),
-                row.get("pdf_local"),
-                row.get("minio_key"),
-                row.get("pdf_location"),
-                row.get("comment"),
-                row.get("journal_ref"),
-                row.get("doi"),
-                row.get("scrape_date"),
-                row.get("query"),
-            ))
-            inserted += 1
-        except Exception as e:
-            conn.rollback()
-            print(f"  [WARN] Failed row {arxiv_id}: {e}")
-            conn = _get_conn()
-            cur = conn.cursor()
-
-    conn.commit()
-    cur.close()
-    conn.close()
-
-    print(f"  → Loaded {inserted}/{len(df)} rows into arxiv_papers")
-    return inserted
-
-
 # ─── STATUS ───────────────────────────────────────────────────────────────────
 
 def status():
@@ -282,11 +203,6 @@ def status():
         cur.execute("SELECT COUNT(*) FROM topcv_jobs")
         topcv_count = cur.fetchone()[0]
         print(f"  TopCV jobs:   {topcv_count:>6}")
-        try:
-            cur.execute("SELECT COUNT(*) FROM arxiv_papers")
-            print(f"  arXiv papers: {cur.fetchone()[0]:>6}")
-        except Exception:
-            conn.rollback()
 
         cur.execute("SELECT COUNT(DISTINCT company) FROM itviec_jobs")
         companies = cur.fetchone()[0]
@@ -318,7 +234,7 @@ def main():
 
     # load
     p_load = sub.add_parser("load", help="Load CSV into database")
-    p_load.add_argument("source", choices=["itviec", "topcv", "arxiv"], help="Data source")
+    p_load.add_argument("source", choices=["itviec", "topcv"], help="Data source")
     p_load.add_argument("--csv", type=Path, help="Path to CSV file")
     p_load.add_argument("--data-dir", type=Path, help="Data directory (auto-finds CSV)")
 
@@ -342,8 +258,6 @@ def main():
 
         if args.source == "itviec":
             load_itviec_csv(csv_path)
-        elif args.source == "arxiv":
-            load_arxiv_csv(csv_path)
         else:
             load_topcv_csv(csv_path)
 

@@ -39,27 +39,27 @@ def main() -> None:
 
     # ── process ──
     p_proc = sub.add_parser("process", help="Clean raw JSON → processed CSV")
-    p_proc.add_argument("source", choices=["itviec", "topcv", "arxiv"], help="Data source")
+    p_proc.add_argument("source", choices=["itviec", "topcv"], help="Data source")
     p_proc.add_argument("--data-dir", type=Path, default=None, help="Data directory")
     p_proc.add_argument("--dashboard-dir", type=Path, default=None,
                         help="Dashboard output dir (default: <data-dir>/dashboard)")
 
     # ── dashboard ──
     p_dash = sub.add_parser("dashboard", help="Build HTML dashboard from processed CSV")
-    p_dash.add_argument("source", choices=["itviec", "topcv", "arxiv"], help="Data source")
+    p_dash.add_argument("source", choices=["itviec", "topcv"], help="Data source")
     p_dash.add_argument("--data-dir", type=Path, default=None, help="Data directory")
     p_dash.add_argument("--dashboard-dir", type=Path, default=None,
                         help="Dashboard output dir (default: <data-dir>/dashboard)")
 
     # ── load-db ──
     p_db = sub.add_parser("load-db", help="Load processed CSV into PostgreSQL")
-    p_db.add_argument("source", choices=["itviec", "topcv", "arxiv"], help="Data source")
+    p_db.add_argument("source", choices=["itviec", "topcv"], help="Data source")
     p_db.add_argument("--csv", type=Path, help="Path to CSV file")
     p_db.add_argument("--data-dir", type=Path, default=None, help="Data directory")
 
     # ── all ──
     p_all = sub.add_parser("all", help="process + load-db (+ optional kaggle push)")
-    p_all.add_argument("source", choices=["itviec", "topcv", "arxiv"], help="Data source")
+    p_all.add_argument("source", choices=["itviec", "topcv"], help="Data source")
     p_all.add_argument("--data-dir", type=Path, default=None, help="Data directory")
     p_all.add_argument("--dashboard-dir", type=Path, default=None,
                         help="Dashboard output dir (default: <data-dir>/dashboard)")
@@ -86,27 +86,21 @@ def main() -> None:
     if args.command == "process":
         if source == "itviec":
             process_itviec(data_dir, dashboard_dir)
-        elif source == "arxiv":
-            process_arxiv(data_dir, dashboard_dir)
         else:
             process_topcv(data_dir, dashboard_dir)
 
     elif args.command == "dashboard":
         if source == "itviec":
             build_itviec_dashboard(data_dir, dashboard_dir)
-        elif source == "arxiv":
-            build_arxiv_dashboard(data_dir, dashboard_dir)
         else:
             build_topcv_dashboard(data_dir, dashboard_dir)
 
     elif args.command == "load-db":
-        from pipeline.db import load_arxiv_csv, load_itviec_csv, load_topcv_csv
+        from pipeline.db import load_itviec_csv, load_topcv_csv
         csv_path = args.csv
         if not csv_path:
             if source == "itviec":
                 csv_path = dashboard_dir / "processed_jobs.csv"
-            elif source == "arxiv":
-                csv_path = dashboard_dir / "processed_arxiv.csv"
             else:
                 csv_path = dashboard_dir / "processed_topcv.csv"
         if not csv_path.exists():
@@ -115,8 +109,6 @@ def main() -> None:
             sys.exit(1)
         if source == "itviec":
             load_itviec_csv(csv_path)
-        elif source == "arxiv":
-            load_arxiv_csv(csv_path)
         else:
             load_topcv_csv(csv_path)
 
@@ -124,22 +116,16 @@ def main() -> None:
         # Process
         if source == "itviec":
             process_itviec(data_dir, dashboard_dir)
-        elif source == "arxiv":
-            process_arxiv(data_dir, dashboard_dir)
         else:
             process_topcv(data_dir, dashboard_dir)
 
         # Load to DB
         if getattr(args, "load_db", False):
-            from pipeline.db import load_arxiv_csv, load_itviec_csv, load_topcv_csv
+            from pipeline.db import load_itviec_csv, load_topcv_csv
             if source == "itviec":
                 csv_path = dashboard_dir / "processed_jobs.csv"
                 if csv_path.exists():
                     load_itviec_csv(csv_path)
-            elif source == "arxiv":
-                csv_path = dashboard_dir / "processed_arxiv.csv"
-                if csv_path.exists():
-                    load_arxiv_csv(csv_path)
             else:
                 csv_path = dashboard_dir / "processed_topcv.csv"
                 if csv_path.exists():
@@ -937,298 +923,11 @@ def build_topcv_dashboard(data_dir: Path, out_dir: Path) -> Path:
     return out_html
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  ARXIV (papers + PDF -> MinIO, metadata -> Postgres)
-# ══════════════════════════════════════════════════════════════════════════════
-
-def process_arxiv(data_dir: Path, out_dir: Path) -> Path:
-    """Chuẩn hóa metadata arXiv: latest CSV -> processed CSV (giữ nguyên cột).
-
-    Scraper đã ghi arxiv_latest.csv đầy đủ cột cho Postgres/Kaggle,
-    bước process chỉ copy + validate nhẹ để đúng pattern 6 bước chung.
-    """
-    latest = data_dir / "arxiv_latest.csv"
-    if not latest.exists():
-        candidates = sorted(data_dir.glob("arxiv_*.csv"))
-        candidates = [c for c in candidates if "processed" not in c.name]
-        if candidates:
-            latest = candidates[-1]
-        else:
-            raise FileNotFoundError(f"No arXiv CSV found in {data_dir}")
-
-    print(f"\n[process] Loading {latest}")
-    df = pd.read_csv(latest)
-    print(f"  → {len(df)} papers loaded")
-
-    # Validate nhẹ: bỏ row thiếu arxiv_id/title
-    if "title" in df.columns:
-        df = df[df["title"].astype(str).str.strip().astype(bool)]
-    if "arxiv_id" in df.columns:
-        df = df.drop_duplicates(subset=["arxiv_id"], keep="last")
-
-    csv_path = out_dir / "processed_arxiv.csv"
-    df.to_csv(csv_path, index=False)
-    print(f"  → Saved {csv_path} ({len(df)} rows)")
-    return csv_path
-
-
-def _arxiv_field(cat: str) -> str:
-    """Gom primary_category arXiv thành nhóm lĩnh vực lớn."""
-    c = (cat or "").strip()
-    if c.startswith("cs."):
-        return "Computer Science"
-    if c.startswith("math"):
-        return "Mathematics"
-    if c.startswith("q-bio"):
-        return "Quantitative Biology"
-    if c.startswith("q-fin"):
-        return "Quantitative Finance"
-    if c == "stat" or c.startswith("stat."):
-        return "Statistics"
-    if c.startswith("eess"):
-        return "EESS"
-    if c.startswith("econ"):
-        return "Economics"
-    return "Physics"
-
-
-_ARXIV_STOPWORDS = frozenset(
-    "a an the and or of to in on for with by from as at is are was were be been being "
-    "this that these those it its into over under between through during via per "
-    "we our they their he she his her you your i "
-    "paper papers study studies result results method methods approach approaches "
-    "novel new using use used based propose proposed present presents "
-    "model models system systems framework frameworks "
-    "analysis analyze analysed theoretical experimental review overview "
-    "towards toward within without high low large small first second "
-    "can may also well one two more most many much such than then thus however "
-    "upon et al".split()
-)
-
-
-def _arxiv_top_keywords(titles, top_n: int = 20):
-    import re
-    from collections import Counter
-    cnt = Counter()
-    for title in titles:
-        for w in re.findall(r"[a-z][a-z\-]{2,}", str(title).lower()):
-            w = w.strip("-")
-            if len(w) >= 3 and w not in _ARXIV_STOPWORDS:
-                cnt[w] += 1
-    return cnt.most_common(top_n)
-
-
-def build_arxiv_dashboard(data_dir: Path, out_dir: Path) -> Path:
-    """Dashboard World Science Overview: toàn cảnh khoa học thế giới qua mẫu arXiv."""
-    csv_path = out_dir / "processed_arxiv.csv"
-    if not csv_path.exists():
-        raise FileNotFoundError(f"Run 'process' first — no {csv_path}")
-
-    print(f"\n[dashboard] Building arXiv world overview from {csv_path}")
-    df = pd.read_csv(csv_path)
-    if df.empty:
-        raise ValueError("Empty arXiv dataset — scrape trước đã")
-
-    import html as html_mod
-
-    import plotly.express as px
-    import plotly.graph_objects as go
-
-    df["field"] = df.get("primary_category", "").fillna("").map(_arxiv_field)
-    df["_pub_date"] = pd.to_datetime(df.get("published"), utc=True, errors="coerce")
-    total = len(df)
-    n_fields = int(df["field"].nunique())
-    n_cats = int(df.get("primary_category", pd.Series(dtype=str)).nunique())
-    valid_dates = df["_pub_date"].dropna()
-    if not valid_dates.empty:
-        date_span = f"{valid_dates.min().date()} → {valid_dates.max().date()}"
-    else:
-        date_span = "N/A"
-
-    top_field = df["field"].value_counts()
-    top_field_name, top_field_n = top_field.index[0], int(top_field.values[0])
-    top_cat = df["primary_category"].fillna("unknown").value_counts()
-    kw = _arxiv_top_keywords(df.get("title", []))
-    top_kw = kw[0] if kw else ("—", 0)
-    authors = pd.Series("; ".join(df.get("authors", "").fillna("")).split("; ")).str.strip()
-    authors = authors[(authors != "") & (authors.str.len() > 2)]
-    top_author = authors.value_counts()
-    top_author_name = top_author.index[0] if not top_author.empty else "—"
-
-    def _fig(fig, height: int = 420):
-        fig.update_layout(
-            height=height,
-            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-            font=dict(family="Inter, system-ui, sans-serif", color="#E8E8F0", size=13),
-            xaxis=dict(gridcolor="rgba(255,255,255,0.06)", zeroline=False),
-            yaxis=dict(gridcolor="rgba(255,255,255,0.06)", zeroline=False),
-            margin=dict(l=20, r=20, t=50, b=20),
-        )
-        return fig.to_html(full_html=False, include_plotlyjs=False)
-
-    charts: list = []
-
-    fc = df["field"].value_counts()
-    fig = px.bar(x=fc.index, y=fc.values, title="🌍 Papers theo lĩnh vực lớn",
-                 color=fc.index, color_discrete_sequence=px.colors.qualitative.Bold,
-                 text=fc.values)
-    fig.update_layout(showlegend=False)
-    fig.update_traces(textposition="outside")
-    charts.append(_fig(fig))
-
-    c15 = top_cat.head(15)
-    fig = go.Figure(go.Bar(x=c15.values[::-1], y=c15.index[::-1], orientation="h",
-                           marker=dict(color="#00D2FF", line_width=0),
-                           text=c15.values[::-1], textposition="outside"))
-    fig.update_layout(title="📚 Top 15 chuyên ngành (primary category)")
-    charts.append(_fig(fig, 480))
-
-    if not valid_dates.empty:
-        per_day = df.assign(day=valid_dates.dt.date).groupby("day").size()
-        fig = go.Figure(go.Scatter(x=[str(d) for d in per_day.index], y=per_day.values,
-                                   mode="lines+markers", line=dict(color="#C9F65D", width=3),
-                                   marker=dict(size=7)))
-        fig.update_layout(title="📈 Nhịp xuất bản theo ngày (mẫu)", xaxis_title="", yaxis_title="Papers")
-        charts.append(_fig(fig, 380))
-
-    if kw:
-        words, counts = zip(*kw)
-        fig = go.Figure(go.Bar(x=list(counts)[::-1], y=list(words)[::-1], orientation="h",
-                               marker=dict(color="#FF6B9D", line_width=0),
-                               text=list(counts)[::-1], textposition="outside"))
-        fig.update_layout(title="🔥 Từ khóa nóng trong tiêu đề")
-        charts.append(_fig(fig, 520))
-
-    if not top_author.empty:
-        ta = top_author.head(10)
-        fig = px.bar(x=ta.values, y=ta.index, orientation="h", title="✍️ Tác giả prolific nhất (mẫu)",
-                     color=ta.values, color_continuous_scale="teal", text=ta.values)
-        fig.update_layout(showlegend=False)
-        charts.append(_fig(fig, 420))
-
-    if "pdf_location" in df.columns and df["pdf_location"].astype(str).str.startswith("s3://").any():
-        is_minio = df["pdf_location"].astype(str).str.startswith("s3://").fillna(False)
-        vals = pd.Series({"MinIO (s3://)": int(is_minio.sum()), "Local": int((~is_minio).sum())})
-        fig = px.pie(values=vals.values, names=vals.index, hole=0.4, title="💾 PDF Storage")
-        charts.append(_fig(fig, 360))
-
-    grid_cells = "".join(f'<div class="chart-card">{h}</div>' for h in charts)
-
-    insights = [
-        f"🌍 Mẫu <strong>{total} papers</strong> mới nhất từ "
-        f"<strong>{n_fields} lĩnh vực / {n_cats} chuyên ngành</strong> ({date_span}).",
-        f"🏆 <strong>{html_mod.escape(str(top_field_name))}</strong> dẫn đầu với "
-        f"{top_field_n} papers ({top_field_n / total * 100:.0f}%).",
-        f"📚 Chuyên ngành sôi động nhất: "
-        f"<strong>{html_mod.escape(str(top_cat.index[0]))}</strong> ({int(top_cat.values[0])} papers).",
-        f"🔥 Từ khóa nóng nhất tiêu đề: "
-        f"<strong>{html_mod.escape(str(top_kw[0]))}</strong> ({top_kw[1]} lượt).",
-        f"✍️ Tác giả xuất hiện nhiều nhất mẫu: "
-        f"<strong>{html_mod.escape(str(top_author_name))}</strong>.",
-    ]
-    insights_html = (
-        '<div class="insights-panel"><div class="insights-title">💡 Key Insights</div>'
-        + "".join(f'<div class="insight-item">{s}</div>' for s in insights)
-        + "</div>"
-    )
-
-    newest = df.sort_values("_pub_date", ascending=False).head(50)
-    rows_html = []
-    for _, r in newest.iterrows():
-        aid = str(r.get("arxiv_id", ""))
-        link = f"https://arxiv.org/abs/{aid}" if aid else "#"
-        rows_html.append(
-            "<tr><td><a href='" + link + "' target='_blank'>" + html_mod.escape(aid) + "</a></td>"
-            "<td>" + html_mod.escape(str(r.get("title", ""))[:160]) + "</td>"
-            "<td>" + html_mod.escape(str(r.get("primary_category", ""))) + "</td>"
-            "<td>" + html_mod.escape(str(r.get("published", ""))[:10]) + "</td></tr>"
-        )
-    table_html = (
-        "<div class='chart-card full'><h3>🆕 50 papers mới nhất</h3>"
-        "<div class='table-wrap'><table><thead><tr><th>ID</th><th>Title</th><th>Cat</th><th>Date</th>"
-        "</tr></thead><tbody>" + "".join(rows_html) + "</tbody></table></div></div>"
-    )
-
-    kpi = (
-        '<div class="kpi-row">'
-        f'<div class="kpi-card"><div class="kpi-value">{total}</div><div class="kpi-label">Papers (mẫu)</div></div>'
-        f'<div class="kpi-card"><div class="kpi-value">{n_fields}</div><div class="kpi-label">Lĩnh vực</div></div>'
-        f'<div class="kpi-card"><div class="kpi-value">{n_cats}</div><div class="kpi-label">Chuyên ngành</div></div>'
-        f'<div class="kpi-card"><div class="kpi-value">{html_mod.escape(str(top_kw[0]))}</div>'
-        '<div class="kpi-label">Keyword nóng</div></div>'
-        "</div>"
-    )
-
-    css = (
-        "* { margin: 0; padding: 0; box-sizing: border-box; }"
-        "body { font-family: Inter, system-ui, sans-serif; background: #0a0a1a; color: #E8E8F0; }"
-        ".container { max-width: 1440px; margin: 0 auto; padding: 30px 24px; }"
-        ".header { text-align: center; margin-bottom: 30px; }"
-        ".header h1 { font-size: 2.4rem; font-weight: 800; "
-        "background: linear-gradient(135deg, #6C63FF, #00D2FF 45%, #C9F65D); "
-        "-webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }"
-        ".subtitle { color: #7A7A8E; margin-top: 8px; }"
-        ".subtitle code { color: #00D2FF; }"
-        ".kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 20px; }"
-        ".kpi-card { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); "
-        "border-radius: 16px; padding: 20px; text-align: center; }"
-        ".kpi-value { font-size: 1.8rem; font-weight: 800; color: #00D2FF; }"
-        ".kpi-label { font-size: 0.8rem; color: #7A7A8E; text-transform: uppercase; margin-top: 4px; }"
-        ".insights-panel { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); "
-        "border-radius: 16px; padding: 20px 28px; margin-bottom: 28px; }"
-        ".insights-title { color: #00D2FF; font-weight: 700; margin-bottom: 10px; text-transform: uppercase; }"
-        ".insight-item { padding: 6px 0; line-height: 1.6; border-bottom: 1px solid rgba(255,255,255,0.05); }"
-        ".insight-item:last-child { border-bottom: none; }"
-        ".insight-item strong { color: #C9F65D; }"
-        ".section-title { font-size: 1.05rem; font-weight: 700; color: #6C63FF; text-transform: uppercase; "
-        "letter-spacing: 1px; margin: 30px 0 16px; padding-left: 14px; border-left: 3px solid #6C63FF; }"
-        ".grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }"
-        ".chart-card { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); "
-        "border-radius: 16px; padding: 20px; overflow: hidden; }"
-        ".chart-card.full { grid-column: 1 / -1; }"
-        ".chart-card h3 { color: #00D2FF; margin-bottom: 10px; }"
-        ".table-wrap { max-height: 520px; overflow: auto; }"
-        "table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }"
-        "th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,0.07); }"
-        "th { color: #00D2FF; position: sticky; top: 0; background: #12122a; }"
-        "td a { color: #C9F65D; text-decoration: none; }"
-        ".footer { text-align: center; color: #7A7A8E; margin-top: 40px; font-size: 0.8rem; }"
-        "@media (max-width: 900px) { .grid { grid-template-columns: 1fr; } "
-        ".kpi-row { grid-template-columns: repeat(2, 1fr); } }"
-    )
-
-    page = (
-        "<!DOCTYPE html>\n<html lang='vi'>\n<head>\n<meta charset='UTF-8'>\n"
-        "<meta name='viewport' content='width=device-width, initial-scale=1.0'>\n"
-        "<title>arXiv World Science Overview</title>\n"
-        '<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>\n'
-        "<style>" + css + "</style>\n</head>\n<body>\n<div class='container'>\n"
-        "  <div class='header'><h1>🌍 World Science Overview</h1>\n"
-        f"  <p class='subtitle'>Mẫu <code>{total}</code> papers arXiv mới nhất · "
-        f"<code>{date_span}</code> · metadata-only "
-        "(PDF/MinIO ở pipeline one-shot riêng)</p></div>\n"
-        f"  {kpi}\n  {insights_html}\n"
-        '  <div class="section-title">📊 Bức tranh lĩnh vực</div>' + "\n"
-        f"  <div class='grid'>{grid_cells}</div>\n"
-        '  <div class="section-title">🆕 Dòng chảy papers mới</div>' + "\n"
-        f"  <div class='grid'>{table_html}</div>\n"
-        f"  <div class='footer'>Nguồn: arXiv API (export.arxiv.org) · {total} papers · {date_span}</div>\n"
-        "</div>\n</body>\n</html>"
-    )
-
-    out_html = out_dir / "arxiv_dashboard.html"
-    out_html.write_text(page, encoding="utf-8")
-    print(f"  → Dashboard saved: {out_html}")
-    return out_html
-
-
 # ─── KAGGLE PUSH ──────────────────────────────────────────────────────────────
 
 def _default_kaggle_id(source: str) -> str:
     if source == "itviec":
         return "quangcrawler/itviec-jobs"
-    if source == "arxiv":
-        return "docutee/arxiv-papers"
     return "docutee/topcv-it-jobs-vietnam"
 
 

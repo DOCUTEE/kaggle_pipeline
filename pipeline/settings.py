@@ -14,7 +14,7 @@ Env hỗ trợ:
     DATA_ROOT      — thư mục data (default: <PROJECT_ROOT>/data)
     KAGGLE_USERNAME / KAGGLE_API_TOKEN — creds push Kaggle (token KGAT_...
     lấy ở kaggle.com/settings/api; cần kaggle>=2.0)
-    ITVIEC_KAGGLE_DATASET / TOPCV_KAGGLE_DATASET / ARXIV_KAGGLE_DATASET
+    ITVIEC_KAGGLE_DATASET / TOPCV_KAGGLE_DATASET
     DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD
 """
 
@@ -67,16 +67,6 @@ SOURCES: dict[str, SourceSettings] = {
         schedule="0 0 * * *",           # document theo DAG jobs_daily (07:00 ICT daily)
         default_max_pages=50,
         default_workers=1,          # Playwright chạy tuần tự
-    ),
-    "arxiv": SourceSettings(
-        name="arxiv",
-        raw_subdir=os.getenv("ARXIV_RAW_SUBDIR", "raw/arxiv"),
-        kaggle_dataset=os.getenv(
-            "ARXIV_KAGGLE_DATASET", f"{KAGGLE_USERNAME}/arxiv-papers"
-        ),
-        schedule="manual",              # chạy 1 lần theo yêu cầu, không đưa vào DAG daily
-        default_max_pages=None,     # None = dùng ARXIV_MAX_RESULTS (default 100)
-        default_workers=1,          # arXiv yêu cầu request tuần tự + delay 3s
     ),
 }
 

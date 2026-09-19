@@ -94,8 +94,8 @@ jobs:
             ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} << 'EOF'
           set -e
           cd /mnt/kaggle_data/kaggle_pipeline
-          # infra (postgres/minio/grafana/airflow) - dùng sudo cho chắc
-          echo "$SSHPASS" | sudo -S docker compose -f infra/docker-compose.yml up -d
+          # infra (docutee đã trong group docker nên không cần sudo/password)
+          docker compose -f infra/docker-compose.yml up -d
           # dashboard venv
           source .venv/bin/activate 2>/dev/null || python3 -m venv .venv
           pip install -q -r requirements.txt

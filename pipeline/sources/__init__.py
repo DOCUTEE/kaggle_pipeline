@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-from pipeline.sources.arxiv import ArxivSource
 from pipeline.sources.itviec import ItviecSource
 from pipeline.sources.topcv import TopcvSource
 
 REGISTRY: dict = {
-    "arxiv": ArxivSource(),
     "itviec": ItviecSource(),
     "topcv": TopcvSource(),
 }

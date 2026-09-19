@@ -104,7 +104,7 @@ Access at: http://100.80.131.68:8501
    (chứa `username` + `key`).
 2. Ghi nhớ `username` trong file — owner của mọi dataset PHẢI là user này,
    nếu không push sẽ 403. Hiện tại `ITVIEC_KAGGLE_DATASET=quangcrawler/itviec-jobs`
-   còn topcv/arxiv theo `KAGGLE_USERNAME` (default `docutee`): nếu bạn chỉ sở hữu
+   còn topcv theo `KAGGLE_USERNAME` (default `docutee`): nếu bạn chỉ sở hữu
    1 account thì sửa dataset còn lại về account đó.
 
 ### 2. Preflight local (không push gì cả)
