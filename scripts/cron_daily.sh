@@ -63,6 +63,10 @@ export LANG="${LANG:-C.UTF-8}"
 # Code cũng tự tìm cạnh python, nhưng thêm PATH cho chắc.
 export PATH="$(dirname "$PY"):$PATH"
 
+# cron redirect stdout ra file → Python đệm block-buffer, log mất hết dòng tiến độ
+# (print của scraper). Bật unbuffered để log phản ánh đúng lúc đang chạy.
+export PYTHONUNBUFFERED=1
+
 SOURCES="${PIPELINE_SOURCES:-itviec,topcv}"
 RETRIES="${PIPELINE_RETRIES:-2}"
 RETRY_DELAY="${PIPELINE_RETRY_DELAY:-60}"
