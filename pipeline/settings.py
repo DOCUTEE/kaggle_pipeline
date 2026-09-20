@@ -69,11 +69,11 @@ SOURCES: dict[str, SourceSettings] = {
             "TOPCV_KAGGLE_DATASET", f"{KAGGLE_USERNAME}/topcv-it-jobs-vietnam"
         ),
         schedule="0 7 * * *",           # document: cron 07:00 ICT (scripts/cron_daily.sh)
-        # Cloudflare của topcv chặn cứng các request phân trang (?page>=2 trả
-        # "Attention Required!" ~4.8KB, không phụ thuộc delay) → chỉ lấy được
-        # page 1 = 50 job mới nhất mỗi ngày; job cũ tích luỹ dần qua upsert.
-        # Muốn lấy sâu hơn: tăng số này khi có proxy/nguồn khác.
-        default_max_pages=1,
+        # Phân trang chạy được nhờ backend CloakBrowser (xem
+        # pipeline/sources/topcv/client.py) — Playwright thường bị Cloudflare trả
+        # "Attention Required!" từ page 2. Cap 60 page (~3.000 job) để tránh chạy
+        # vô hạn nếu site báo sai số trang.
+        default_max_pages=60,
         default_workers=1,          # Playwright chạy tuần tự
         raw_prefix="topcv_jobs",
         dashboard_html="topcv_dashboard.html",

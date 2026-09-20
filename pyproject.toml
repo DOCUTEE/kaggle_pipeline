@@ -11,6 +11,9 @@ license = { text = "MIT" }
 # file này + uv.lock. Scheduler là cron (scripts/cron_daily.sh) — không dùng Airflow.
 dependencies = [
     "playwright>=1.40.0",
+    # Backend browser cho topcv: Chromium patch fingerprint ở tầng C++ — cần để
+    # vượt qua Cloudflare khi phân trang (Playwright bị chặn từ page 2).
+    "cloakbrowser>=0.5",
     "beautifulsoup4>=4.12.0",
     "requests>=2.31.0",
     "pandas>=2.1.0",

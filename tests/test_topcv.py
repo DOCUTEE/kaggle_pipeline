@@ -215,6 +215,45 @@ class TestTopcvRealMarkup(unittest.TestCase):
         self.assertEqual(parse_total_pages('<html><ul class="pagination">Trang 1</ul></html>'), 1)
 
 
+class TestTopcvBrowserBackend(unittest.TestCase):
+    """2 backend dùng chung 1 API (Playwright) — parser/scraper không cần biết."""
+
+    def test_default_backend_is_cloak(self):
+        from unittest import mock
+        from pipeline.sources.topcv.client import DEFAULT_BACKEND, TopCvBrowser
+
+        with mock.patch.dict("os.environ", {}, clear=False):
+            import os
+            os.environ.pop("TOPCV_BROWSER", None)
+            self.assertEqual(DEFAULT_BACKEND, "cloak")
+            self.assertEqual(TopCvBrowser().backend, "cloak")
+
+    def test_env_can_switch_to_playwright(self):
+        from unittest import mock
+        from pipeline.sources.topcv.client import TopCvBrowser
+
+        with mock.patch.dict("os.environ", {"TOPCV_BROWSER": "playwright"}):
+            self.assertEqual(TopCvBrowser().backend, "playwright")
+
+    def test_explicit_backend_wins_over_env(self):
+        from unittest import mock
+        from pipeline.sources.topcv.client import TopCvBrowser
+
+        with mock.patch.dict("os.environ", {"TOPCV_BROWSER": "playwright"}):
+            self.assertEqual(TopCvBrowser(backend="cloak").backend, "cloak")
+
+    def test_start_dispatches_to_chosen_backend(self):
+        from unittest import mock
+        from pipeline.sources.topcv.client import TopCvBrowser
+
+        for backend, method in (("cloak", "_start_cloak"), ("playwright", "_start_playwright")):
+            browser = TopCvBrowser(backend=backend)
+            with mock.patch.object(TopCvBrowser, method) as called, \
+                 mock.patch.object(TopCvBrowser, "_start_cloak" if backend != "cloak" else "_start_playwright"):
+                browser.start()
+                called.assert_called_once()
+
+
 class TestTopcvPageFailure(unittest.TestCase):
     """0 job phải bị coi là page lỗi để orchestrator retry, không im lặng bỏ qua."""
 

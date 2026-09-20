@@ -69,17 +69,22 @@ Sửa `pipeline/settings.py` (entry `SOURCES["topcv"]`) hoặc override bằng e
 Daily 07:00 ICT qua `scripts/cron_daily.sh` (chạy `python -m pipeline run topcv --load-db`).
 Chạy tay: `./scripts/cron_daily.sh` hoặc `python -m pipeline run topcv`.
 
-## ⚠️ Giới hạn: Cloudflare chặn phân trang
+## Phân trang & Cloudflare (đã xử lý)
 
-Đo trực tiếp 2026-09-20: `?page=2` (và mọi page sau) trả trang
-`Attention Required! | Cloudflare` (~4.8KB, 0 job) — **không phụ thuộc delay**
-(đã thử 3s → 45s) và click link phân trang cũng bị chặn. Page 1 thì tải bình
-thường (~1.9MB, 50 job).
+topcv có ~2.700 job IT / ~55 page. **Playwright thường KHÔNG phân trang được**:
+từ `?page=2` Cloudflare trả trang `Attention Required!` (~4.8KB, 0 job) — đo trực
+tiếp: không phụ thuộc delay (3s→45s), click link phân trang cũng bị chặn.
 
-Vì vậy `default_max_pages = 1` cho topcv: mỗi ngày lấy **50 job mới nhất**;
-các job trùng được upsert theo `job_id` trong Postgres nên dữ liệu vẫn tích luỹ
-theo thời gian. Code vẫn hỗ trợ nhiều page (`--max-pages N`) — khi có proxy
-hoặc Cloudflare nới lỏng thì chỉ cần tăng tham số, không phải sửa code.
+**Cách xử lý:** dùng backend **CloakBrowser** (`pipeline/sources/topcv/client.py`,
+env `TOPCV_BROWSER=cloak|playwright`, mặc định `cloak`) — Chromium được patch
+fingerprint ở tầng C++ nên qua được Cloudflare và **phân trang chạy bình thường**
+(đo: 5 page liên tiếp → 250 job, không trùng nhau).
+
+- `default_max_pages = 60` (~3.000 job) — cap để tránh chạy vô hạn.
+- Delay giữa các page: `PAGE_DELAY_RANGE = (1.5, 3.0)` giây.
+- Không cần vào trang chi tiết: toàn bộ field lấy từ card ở trang listing.
+- Nếu CloakBrowser hỏng/bị chặn: đặt `TOPCV_BROWSER=playwright` để quay lại
+  (khi đó chỉ lấy được page 1, job tích luỹ dần qua upsert theo `job_id`).
 
 ## Dependencies
 - playwright
