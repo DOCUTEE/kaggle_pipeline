@@ -63,7 +63,10 @@ services:
       retries: 5
 
   airflow-init:
-    image: apache/airflow:2.9.3-python3.12
+    image: kaggle-airflow:2.9.3
+    build:
+      context: .
+      dockerfile: airflow.Dockerfile
     depends_on:
       airflow-db:
         condition: service_healthy
@@ -71,19 +74,19 @@ services:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db:5432/airflow
       AIRFLOW__CORE__LOAD_EXAMPLES: "False"
-      _PIP_ADDITIONAL_REQUIREMENTS: "pandas beautifulsoup4 requests lxml kaggle psycopg2-binary playwright plotly pydantic tenacity"
+      _PIP_ADDITIONAL_REQUIREMENTS: "pandas beautifulsoup4 requests lxml kaggle psycopg2-binary playwright==1.63.0 plotly pydantic tenacity"
     entrypoint: /bin/bash
-    # playwright chromium: scraper topcv chạy trong container này nên browser phải có sẵn.
-    # Cache vào volume playwright_ms (dùng chung với scheduler) để không tải lại mỗi lần start.
-    command: -c "airflow db migrate && airflow users create --username admin --password admin --firstname admin --lastname admin --role Admin --email admin@example.com || true; python -m playwright install chromium || true; sudo -n python -m playwright install-deps chromium || true"
+    command: -c "airflow db migrate && airflow users create --username admin --password admin --firstname admin --lastname admin --role Admin --email admin@example.com || true"
     volumes:
       - ../dags:/opt/airflow/dags:ro
       - ..:/opt/airflow/kaggle_pipeline:ro
       - airflow_logs:/opt/airflow/logs
-      - playwright_ms:/home/airflow/.cache/ms-playwright
 
   airflow-scheduler:
-    image: apache/airflow:2.9.3-python3.12
+    image: kaggle-airflow:2.9.3
+    build:
+      context: .
+      dockerfile: airflow.Dockerfile
     container_name: kaggle_airflow_scheduler
     restart: unless-stopped
     depends_on:
@@ -114,17 +117,19 @@ services:
       # Dataset id: KHÔNG set ở đây — để pipeline/settings.py tự build từ
       # KAGGLE_USERNAME (tránh env rỗng "" ghi đè default trong code).
       # Chỉ export ITVIEC/TOPCV_KAGGLE_DATASET khi muốn override hẳn id.
-      _PIP_ADDITIONAL_REQUIREMENTS: "pandas beautifulsoup4 requests lxml kaggle psycopg2-binary playwright plotly pydantic tenacity"
+      _PIP_ADDITIONAL_REQUIREMENTS: "pandas beautifulsoup4 requests lxml kaggle psycopg2-binary playwright==1.63.0 plotly pydantic tenacity"
     volumes:
       - ../dags:/opt/airflow/dags:ro
       - ..:/opt/airflow/kaggle_pipeline:ro
       - ../data:/opt/airflow/data
       - airflow_logs:/opt/airflow/logs
-      - playwright_ms:/home/airflow/.cache/ms-playwright
     command: scheduler
 
   airflow-webserver:
-    image: apache/airflow:2.9.3-python3.12
+    image: kaggle-airflow:2.9.3
+    build:
+      context: .
+      dockerfile: airflow.Dockerfile
     container_name: kaggle_airflow_webserver
     restart: unless-stopped
     depends_on:
@@ -153,4 +158,3 @@ volumes:
   grafana_data:
   airflow_pgdata:
   airflow_logs:
-  playwright_ms:      # chromium cho scraper topcv (airflow-init cài, scheduler dùng)
