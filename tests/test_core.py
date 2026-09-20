@@ -250,6 +250,39 @@ class TestDbEnvFallback(unittest.TestCase):
         self.assertEqual(cfg["database"], "kaggle_pipeline")
 
 
+class TestKaggleBinary(unittest.TestCase):
+    """Cron không có .venv/bin trong PATH → phải tìm được kaggle cạnh python."""
+
+    def test_found_on_path(self):
+        from unittest import mock
+        from pipeline.core import publish
+
+        with mock.patch("shutil.which", return_value="/usr/bin/kaggle"):
+            self.assertEqual(publish.kaggle_bin(), "/usr/bin/kaggle")
+
+    def test_falls_back_to_sibling_of_python(self):
+        import tempfile
+        from unittest import mock
+        from pipeline.core import publish
+
+        with tempfile.TemporaryDirectory() as td:
+            fake_kaggle = Path(td) / "kaggle"
+            fake_kaggle.write_text("#!/bin/sh\n")
+            with mock.patch("shutil.which", return_value=None), \
+                 mock.patch("sys.executable", str(Path(td) / "python")):
+                self.assertEqual(publish.kaggle_bin(), str(fake_kaggle))
+
+    def test_returns_none_when_missing(self):
+        import tempfile
+        from unittest import mock
+        from pipeline.core import publish
+
+        with tempfile.TemporaryDirectory() as td:
+            with mock.patch("shutil.which", return_value=None), \
+                 mock.patch("sys.executable", str(Path(td) / "python")):
+                self.assertIsNone(publish.kaggle_bin())
+
+
 class TestDashboard(unittest.TestCase):
     def _df(self) -> pd.DataFrame:
         return build_processed_df([ROW_FULL, {**ROW_FULL, "job_id": "k2", "title": "Junior Tester"}], source="itviec")

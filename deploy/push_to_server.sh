@@ -83,6 +83,8 @@ $SSH "set -e
   chmod -R a+rX dags pipeline scripts tests docs deploy infra/grafana 2>/dev/null || true
   chmod a+r infra/*.sql infra/*.yml infra/Dockerfile 2>/dev/null || true
   chmod 600 infra/.env 2>/dev/null || true
+  # data/ được ghi bởi 2 uid khác nhau: cron (host, 1000) và Airflow container (50000)
+  chmod -R a+rwX data 2>/dev/null || true
   docker compose -f infra/docker-compose.yml up -d
   docker compose -f infra/docker-compose.yml ps
   .venv/bin/pip install -q -r requirements.txt 2>/dev/null || true"

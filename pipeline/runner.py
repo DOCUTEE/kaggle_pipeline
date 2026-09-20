@@ -49,6 +49,7 @@ class StepSummary:
     source: str
     steps_ok: list[str] = field(default_factory=list)
     steps_skipped: list[str] = field(default_factory=list)
+    steps_failed: list[str] = field(default_factory=list)
     jobs: int = 0          # jobs scrape được
     rows: int = 0          # rows sau process
     duration_s: float = 0.0
@@ -112,8 +113,13 @@ def run_one(source_name: str, opts: RunOptions | None = None) -> StepSummary:
         staging = publish.prepare_staging(
             settings.kaggle_dir_for(data_dir), src.staging_files(data_dir, dashboard_dir)
         )
-        publish.push_to_kaggle(staging, kaggle_id)
-        summary.steps_ok.append("kaggle_push")
+        if publish.push_to_kaggle(staging, kaggle_id):
+            summary.steps_ok.append("kaggle_push")
+        else:
+            # Dữ liệu đã vào Postgres rồi — không coi cả run là fail, nhưng phải
+            # hiện ra rõ (trước đây luôn báo ok nên lỗi này bị che).
+            summary.steps_failed.append("kaggle_push")
+            logger.warning("[%s] kaggle_push THẤT BẠI — xem log phía trên", source_name)
     else:
         summary.steps_skipped.append("kaggle_push")
 
@@ -181,6 +187,11 @@ def print_summary(results: list[StepSummary]) -> None:
     print(f"\n{'#' * 60}")
     print(f"# PIPELINE COMPLETE: {datetime.now().isoformat()}")
     for r in results:
-        status = f"ERROR: {r.error}" if r.error else f"jobs={r.jobs} rows={r.rows} steps={r.steps_ok}"
+        if r.error:
+            status = f"ERROR: {r.error}"
+        else:
+            status = f"jobs={r.jobs} rows={r.rows} steps={r.steps_ok}"
+            if r.steps_failed:
+                status += f" ⚠ FAILED={r.steps_failed}"
         print(f"#  - {r.source}: {status}")
     print(f"{'#' * 60}")

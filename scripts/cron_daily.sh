@@ -44,6 +44,25 @@ fi
 PY="$REPO_ROOT/.venv/bin/python"
 [ -x "$PY" ] || PY="$(command -v python3)"
 
+# ── preflight: data dir phải ghi được ───────────────────────────────────────
+# Volume này từng bị container Airflow (uid 50000) ghi trước, nên khi cron chạy
+# bằng user host (uid 1000) có thể bị PermissionError. Báo rõ thay vì fail mơ hồ.
+DATA_ROOT="${DATA_ROOT:-$REPO_ROOT/data}"
+mkdir -p "$DATA_ROOT" 2>/dev/null
+if ! ( : > "$DATA_ROOT/.write_test" ) 2>/dev/null; then
+  log "LỖI: không ghi được $DATA_ROOT — sửa bằng: chmod -R a+rwX $DATA_ROOT"
+  exit 3
+fi
+rm -f "$DATA_ROOT/.write_test"
+
+# cron không có locale: Python in tiếng Việt/ký tự mũi tên sẽ lỗi UnicodeEncode
+export PYTHONIOENCODING="${PYTHONIOENCODING:-utf-8}"
+export LANG="${LANG:-C.UTF-8}"
+
+# cron không có .venv/bin trong PATH → console script (kaggle, playwright…) không thấy.
+# Code cũng tự tìm cạnh python, nhưng thêm PATH cho chắc.
+export PATH="$(dirname "$PY"):$PATH"
+
 SOURCES="${PIPELINE_SOURCES:-itviec,topcv}"
 RETRIES="${PIPELINE_RETRIES:-2}"
 RETRY_DELAY="${PIPELINE_RETRY_DELAY:-60}"

@@ -10,6 +10,7 @@ import json
 import logging
 import shutil
 import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Mapping
@@ -17,6 +18,19 @@ from typing import Mapping
 import pandas as pd
 
 logger = logging.getLogger(__name__)
+
+
+def kaggle_bin() -> str | None:
+    """Tìm `kaggle`: PATH trước, rồi tới cùng thư mục với python đang chạy.
+
+    Cần thiết vì cron không có `.venv/bin` trong PATH — nếu chỉ dựa vào PATH thì
+    bước push Kaggle âm thầm bị bỏ qua (đã từng xảy ra).
+    """
+    found = shutil.which("kaggle")
+    if found:
+        return found
+    sibling = Path(sys.executable).parent / "kaggle"
+    return str(sibling) if sibling.exists() else None
 
 
 def prepare_staging(staging_dir: Path, files: Mapping[Path, str]) -> Path:
@@ -38,6 +52,11 @@ def prepare_staging(staging_dir: Path, files: Mapping[Path, str]) -> Path:
 def push_to_kaggle(staging_dir: Path, dataset_id: str) -> bool:
     """Tạo metadata + `kaggle datasets version|create`. Trả True nếu thành công."""
     print(f"\n[kaggle] Pushing to {dataset_id}")
+
+    cli = kaggle_bin()
+    if not cli:
+        print("  → [WARN] không tìm thấy kaggle CLI (PATH và cạnh python) — bỏ qua push")
+        return False
     meta = {
         "title": dataset_id.split("/")[-1],
         "id": dataset_id,
@@ -46,7 +65,7 @@ def push_to_kaggle(staging_dir: Path, dataset_id: str) -> bool:
     (Path(staging_dir) / "dataset-metadata.json").write_text(json.dumps(meta, indent=2))
 
     def _run(*args: str) -> subprocess.CompletedProcess:
-        return subprocess.run(["kaggle", *args], capture_output=True, text=True, timeout=300)
+        return subprocess.run([cli, *args], capture_output=True, text=True, timeout=300)
 
     try:
         result = _run(
