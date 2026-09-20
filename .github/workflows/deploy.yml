@@ -123,4 +123,4 @@ jobs:
         run: |
           sshpass -e ssh -o StrictHostKeyChecking=no -o ConnectTimeout=20 \
             ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} \
-            "curl -s -o /dev/null -w 'airflow:%{http_code} ' --max-time 20 http://localhost:8080/health; curl -s -o /dev/null -w 'grafana:%{http_code}\n' --max-time 20 http://localhost:3000/api/health"
+            "curl -s -o /dev/null -w 'grafana:%{http_code}\n' --max-time 20 http://localhost:3000/api/health; crontab -l | grep -c cron_daily.sh | sed 's/^/cron entries: /'"

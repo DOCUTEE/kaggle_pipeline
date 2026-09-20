@@ -27,7 +27,7 @@ Không còn CSV, không còn web app Streamlit. **PostgreSQL là nguồn dữ li
 | # | Service | Version | Port (nội bộ) | Dùng cho | Ghi chú |
 |---|---|---|---|---|---|
 | 1 | **PostgreSQL** | 15+ | 5432 | Kho dữ liệu phân tích (`itviec_jobs`, `topcv_jobs` + views) | Schema ở `infra/init.sql` — **bắt buộc apply**, gồm cả `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` cho DB đã tồn tại |
-| 2 | **Airflow** | 2.9.3 (`apache/airflow:2.9.3-python3.12`) | 8080 | Scheduler duy nhất, chạy DAG `jobs_daily` | LocalExecutor. Cần mount `dags/` + repo, và `_PIP_ADDITIONAL_REQUIREMENTS` như trong compose |
+| 2 | **Airflow** *(optional — xem ghi chú dưới)* | 2.9.3 | 8080 | UI/backfill; **không phải scheduler chính nữa** | Bật bằng `docker compose --profile airflow up -d`. Scheduler chính là **cron** `scripts/cron_daily.sh` (07:00 ICT) |
 | 3 | **Airflow metadata DB** | PostgreSQL 15 | (nội bộ) | DB riêng cho Airflow | Trong compose đã có service `airflow-db`, không expose ra ngoài |
 | 4 | **Grafana** | latest | 3000 | Dashboard query trực tiếp Postgres | Datasource provisioning ở `infra/grafana/provisioning/datasources/postgres.yml` |
 | 5 | **Docker + Docker Compose** | v2 | — | Chạy 4 service trên | User deploy phải nằm trong group `docker` (compose hiện gọi không qua `sudo`) |
@@ -52,6 +52,9 @@ retention 30 ngày (pipeline tự xoá snapshot cũ).
 Toàn bộ đọc từ env (`pipeline/settings.py`, `pipeline/db.py`, `dags/jobs_daily.py`).
 File mẫu: `infra/.env.example` → copy thành `infra/.env`, **không commit**.
 
+> **Scheduler chính = cron** (`scripts/cron_daily.sh`, cài qua `deploy/setup_server.sh`).
+> Airflow chỉ bật khi cần UI/backfill → tiết kiệm ~1.25GB RAM.
+>
 > **1 nguồn sự thật duy nhất:** `infra/.env`. Postgres container, Grafana datasource
 > (provisioning interpolate `${POSTGRES_*}`) và Airflow đều đọc cùng file này —
 > đổi password chỉ cần sửa 1 chỗ, không sửa code/compose.

@@ -218,6 +218,38 @@ class TestDbSpec(unittest.TestCase):
         self.assertIn("loaded_at = NOW()", sql)
 
 
+class TestDbEnvFallback(unittest.TestCase):
+    """1 file infra/.env dùng chung: container đọc DB_*, cron/host đọc POSTGRES_*."""
+
+    def _config_with(self, **env):
+        import importlib
+        import os
+        from unittest import mock
+
+        base = {k: v for k, v in os.environ.items()
+                if k not in ("DB_HOST", "DB_NAME", "DB_USER", "DB_PASSWORD",
+                             "POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_HOST")}
+        with mock.patch.dict(os.environ, {**base, **env}, clear=True):
+            return importlib.reload(dbmod).DB_CONFIG
+
+    def test_prefers_db_vars(self):
+        cfg = self._config_with(DB_NAME="dbname", DB_USER="dbuser", DB_PASSWORD="dbpass",
+                                POSTGRES_DB="pgname", POSTGRES_USER="pguser", POSTGRES_PASSWORD="pgpass")
+        self.assertEqual((cfg["database"], cfg["user"], cfg["password"]), ("dbname", "dbuser", "dbpass"))
+
+    def test_falls_back_to_postgres_vars_for_host_cron(self):
+        cfg = self._config_with(POSTGRES_DB="kaggle_pipeline", POSTGRES_USER="pipeline",
+                                POSTGRES_PASSWORD="secret")
+        self.assertEqual((cfg["database"], cfg["user"], cfg["password"]),
+                         ("kaggle_pipeline", "pipeline", "secret"))
+
+    def test_defaults_when_nothing_set(self):
+        cfg = self._config_with()
+        self.assertEqual(cfg["host"], "localhost")
+        self.assertEqual(cfg["port"], 5432)
+        self.assertEqual(cfg["database"], "kaggle_pipeline")
+
+
 class TestDashboard(unittest.TestCase):
     def _df(self) -> pd.DataFrame:
         return build_processed_df([ROW_FULL, {**ROW_FULL, "job_id": "k2", "title": "Junior Tester"}], source="itviec")

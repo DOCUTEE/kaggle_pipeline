@@ -88,10 +88,14 @@ $SSH "set -e
   .venv/bin/pip install -q -r requirements.txt 2>/dev/null || true"
 
 echo "[4/4] health check..."
-$SSH "curl -s -o /dev/null -w '  airflow:%{http_code}\n' --max-time 20 http://localhost:8080/health
-      curl -s -o /dev/null -w '  grafana:%{http_code}\n' --max-time 20 http://localhost:3000/api/health"
+$SSH "set -a; . ${REMOTE_DIR}/infra/.env 2>/dev/null; set +a
+      docker exec kaggle_postgres psql -U \"\${POSTGRES_USER:-pipeline}\" -d \"\${POSTGRES_DB:-kaggle_pipeline}\" -tAc \
+        'SELECT 1' >/dev/null 2>&1 && echo '  postgres: OK' || echo '  postgres: FAIL'
+      curl -s -o /dev/null -w '  grafana:%{http_code}\n' --max-time 20 http://localhost:3000/api/health
+      docker ps --filter name=kaggle_airflow_webserver --format '  airflow (optional): {{.Status}}' | grep . || echo '  airflow (optional): không chạy (bình thường — scheduler là cron)'"
 
 echo ""
-echo "Xong. Chạy pipeline tay trên server:"
+echo "Xong. Scheduler chính là cron 07:00 (scripts/cron_daily.sh)."
+echo "Chạy pipeline tay trên server:"
 echo "  ssh ${SERVER_USER}@${SERVER_IP}"
 echo "  cd ${REMOTE_DIR} && set -a && . infra/.env && set +a && .venv/bin/python -m pipeline run topcv --load-db"

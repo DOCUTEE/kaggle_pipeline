@@ -1,13 +1,17 @@
 # Infrastructure
 
-PostgreSQL + Grafana + Airflow (scheduler duy nhất, không dùng cron).
+PostgreSQL + Grafana là phần chạy mặc định.
+Airflow nằm sau profile `airflow` (không chạy mặc định — scheduler chính là cron).
 
 ## Quick Start
 
 ```bash
-# Start all services (postgres, grafana, airflow-db, scheduler, webserver)
+# Mặc định: chỉ postgres + grafana
 cd infra
 docker compose up -d
+
+# Bật thêm Airflow (UI + backfill, tốn ~1.25GB RAM)
+docker compose --profile airflow up -d
 
 # Check status
 docker compose ps
@@ -15,7 +19,7 @@ docker compose ps
 # View logs
 docker compose logs -f grafana
 docker compose logs -f postgres
-docker compose logs -f airflow-scheduler
+docker compose --profile airflow logs -f airflow-scheduler
 ```
 
 ## Access
@@ -43,7 +47,7 @@ python -m pipeline run all    --load-db
 - **ITviec Overview**: http://localhost:3000/d/itviec-overview
 - Auto-provisioned from `grafana/dashboards/overview.json`
 
-## Airflow DAG
+## Airflow DAG (optional — không chạy mặc định)
 
 - **DAG**: `jobs_daily` (dags/jobs_daily.py), schedule `0 0 * * *`
 - Trigger tay: Airflow UI → `jobs_daily` → Trigger DAG

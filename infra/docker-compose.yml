@@ -42,11 +42,15 @@ services:
       postgres:
         condition: service_healthy
 
-  # ─── AIRFLOW (scheduler duy nhất, thay cron) ──────────────────────────────
-  # Airflow chạy DAG dags/jobs_daily.py mỗi ngày 00:00 UTC (= 07:00 ICT).
+  # ─── AIRFLOW (OPTIONAL — không chạy mặc định) ─────────────────────────────
+  # Scheduler chính hiện là CRON (scripts/cron_daily.sh, 07:00 ICT).
+  # Airflow vẫn giữ trong repo để bật lại khi cần backfill/UI:
+  #     cd infra && docker compose --profile airflow up -d
+  # Tốn thêm ~1.25GB RAM (webserver 731MB + scheduler 478MB + metadata db 39MB).
   # Code pipeline được mount read-only vào container, chạy qua `python -m pipeline run`.
   # Truy cập UI: http://localhost:8080 (admin/admin, đổi qua env khi lên server).
   airflow-db:
+    profiles: ["airflow"]      # tắt mặc định — scheduler chính là cron (xem scripts/cron_daily.sh)
     image: postgres:15-alpine
     container_name: kaggle_airflow_db
     restart: unless-stopped
@@ -63,6 +67,7 @@ services:
       retries: 5
 
   airflow-init:
+    profiles: ["airflow"]      # tắt mặc định — scheduler chính là cron (xem scripts/cron_daily.sh)
     image: kaggle-airflow:2.9.3
     build:
       context: .
@@ -83,6 +88,7 @@ services:
       - airflow_logs:/opt/airflow/logs
 
   airflow-scheduler:
+    profiles: ["airflow"]      # tắt mặc định — scheduler chính là cron (xem scripts/cron_daily.sh)
     image: kaggle-airflow:2.9.3
     build:
       context: .
@@ -126,6 +132,7 @@ services:
     command: scheduler
 
   airflow-webserver:
+    profiles: ["airflow"]      # tắt mặc định — scheduler chính là cron (xem scripts/cron_daily.sh)
     image: kaggle-airflow:2.9.3
     build:
       context: .

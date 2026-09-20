@@ -27,12 +27,25 @@ from pipeline.core.snapshot import split_list
 
 # ─── CONFIG ───────────────────────────────────────────────────────────────────
 
+def _env(*names: str, default: str) -> str:
+    """Lấy env đầu tiên có giá trị (khác rỗng).
+
+    Cho phép 1 file `infra/.env` dùng chung: container đọc `DB_*` (compose set),
+    cron/host chạy tay chỉ cần `POSTGRES_*` — không phải export thêm gì.
+    """
+    for name in names:
+        value = os.getenv(name)
+        if value:
+            return value
+    return default
+
+
 DB_CONFIG = {
-    "host": os.getenv("DB_HOST", "localhost"),
-    "port": int(os.getenv("DB_PORT", "5432")),
-    "database": os.getenv("DB_NAME", "kaggle_pipeline"),
-    "user": os.getenv("DB_USER", "pipeline"),
-    "password": os.getenv("DB_PASSWORD", "pipeline_dev_2024"),
+    "host": _env("DB_HOST", "POSTGRES_HOST", default="localhost"),
+    "port": int(_env("DB_PORT", default="5432")),
+    "database": _env("DB_NAME", "POSTGRES_DB", default="kaggle_pipeline"),
+    "user": _env("DB_USER", "POSTGRES_USER", default="pipeline"),
+    "password": _env("DB_PASSWORD", "POSTGRES_PASSWORD", default="pipeline_dev_2024"),
 }
 
 

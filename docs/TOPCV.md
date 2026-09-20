@@ -20,7 +20,7 @@ pipeline/settings.py            # config: SOURCES["topcv"]
 data/raw/topcv/                 # output: raw JSON + dashboard/processed_jobs.json
 ```
 
-> Schedule duy nhất là Airflow DAG `jobs_daily` (không dùng cron).
+> Schedule: cron 07:00 hàng ngày (`scripts/cron_daily.sh`).
 > Chạy tay: `python -m pipeline run topcv`.
 
 ## Usage
@@ -65,9 +65,9 @@ python -m pipeline run topcv --load-db
 Sửa `pipeline/settings.py` (entry `SOURCES["topcv"]`) hoặc override bằng env:
 `TOPCV_KAGGLE_DATASET`, `TOPCV_RAW_SUBDIR`, `DATA_ROOT`.
 
-## Schedule (Airflow — không dùng cron)
-Daily 00:00 UTC = 07:00 ICT qua DAG `jobs_daily`
-(`dags/jobs_daily.py`, task `run_topcv`). Trigger tay trên Airflow UI.
+## Schedule (cron)
+Daily 07:00 ICT qua `scripts/cron_daily.sh` (chạy `python -m pipeline run topcv --load-db`).
+Chạy tay: `./scripts/cron_daily.sh` hoặc `python -m pipeline run topcv`.
 
 ## ⚠️ Giới hạn: Cloudflare chặn phân trang
 
