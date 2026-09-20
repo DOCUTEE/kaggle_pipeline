@@ -72,11 +72,17 @@ jobs:
       - name: Install deploy tools
         run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass rsync
 
-      - name: Rsync code to server (trừ data/logs/venv)
+      - name: Rsync code to server (xoá file đã bị remove khỏi repo)
         env:
           SSHPASS: ${{ secrets.SERVER_PASSWORD }}
         run: |
-          sshpass -e rsync -avz --timeout=120 \
+          # --delete: file bị xoá/đổi tên trong repo PHẢI biến mất trên server.
+          # Không có nó, các lần refactor trước để lại module cũ (itviec.py cạnh
+          # itviec/, sources/__init__.py cũ import arxiv…) làm pipeline chết.
+          # Loại trừ những thứ chỉ tồn tại trên server: .venv, data, logs và
+          # 2 file secret (infra/.env, infra/CREDENTIALS.txt) — rsync không xoá
+          # đường dẫn nằm trong --exclude.
+          sshpass -e rsync -avz --delete --timeout=120 \
             -e "ssh -o StrictHostKeyChecking=no -o ConnectTimeout=20" \
             --exclude='.git' \
             --exclude='.venv' \
@@ -84,6 +90,10 @@ jobs:
             --exclude='*.pyc' \
             --exclude='logs/' \
             --exclude='data/' \
+            --exclude='infra/.env' \
+            --exclude='infra/CREDENTIALS.txt' \
+            --exclude='*.bak' \
+            --exclude='*.tar.gz' \
             ./ ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:/mnt/kaggle_data/kaggle_pipeline/
 
       - name: Restart infra on server
