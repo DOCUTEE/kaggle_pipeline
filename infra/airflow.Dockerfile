@@ -13,7 +13,9 @@ USER root
 ARG PLAYWRIGHT_VERSION=1.63.0
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
 
-RUN pip install --no-cache-dir "playwright==${PLAYWRIGHT_VERSION}" \
+# `python -m pip` chứ không phải `pip`: shim `pip` của image Airflow chặn khi
+# chạy bằng root ("You are running pip as root"), còn gọi module thì không.
+RUN python -m pip install --no-cache-dir "playwright==${PLAYWRIGHT_VERSION}" \
     && python -m playwright install --with-deps chromium \
     && chmod -R a+rX /opt/ms-playwright
 

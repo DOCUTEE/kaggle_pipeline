@@ -1,38 +1,97 @@
 #!/bin/bash
-# Push code from local to server
-# Usage: ./deploy/push_to_server.sh
+# Deploy TAY lên server (không qua CI) — dùng khi cần đẩy code ngay.
+#
+#   ./deploy/push_to_server.sh              # rsync code + build image + compose up + health check
+#   ./deploy/push_to_server.sh --dry-run    # chỉ xem file nào sẽ đổi/xoá, không làm gì
+#   ./deploy/push_to_server.sh --no-build   # bỏ qua bước build image (nhanh hơn)
+#
+# Khác CI ở chỗ: CI chạy test trước rồi mới rsync; script này KHÔNG chạy test —
+# chạy `python -m unittest discover -s tests` trước nếu muốn chắc.
+#
+# Env override: SERVER_IP, SERVER_USER, SERVER_PASS, REMOTE_DIR
+set -euo pipefail
 
-set -e
-
-SERVER_IP="100.80.131.68"
-SERVER_USER="docutee"
-SERVER_PASS="12032512"
-REMOTE_DIR="/mnt/kaggle_data/topcv"
+SERVER_IP="${SERVER_IP:-100.80.131.68}"          # IP Tailscale
+SERVER_USER="${SERVER_USER:-docutee}"
+SERVER_PASS="${SERVER_PASS:-12032512}"           # nên chuyển sang SSH key khi rảnh
+REMOTE_DIR="${REMOTE_DIR:-/mnt/kaggle_data/kaggle_pipeline}"
 LOCAL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
+DRY_RUN=0
+BUILD=1
+for arg in "$@"; do
+  case "$arg" in
+    --dry-run) DRY_RUN=1 ;;
+    --no-build) BUILD=0 ;;
+    -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
+    *) echo "Tham số lạ: $arg"; exit 2 ;;
+  esac
+done
+
+export SSHPASS="$SERVER_PASS"
+SSH="sshpass -e ssh -o StrictHostKeyChecking=no -o ConnectTimeout=20 ${SERVER_USER}@${SERVER_IP}"
+
+# --delete: file bị xoá/đổi tên trong repo phải biến mất trên server (nếu không,
+# module cũ nằm cạnh package mới từng làm pipeline chết vì import arxiv).
+# Các --exclude là những thứ CHỈ có trên server — rsync không xoá path bị exclude.
+RSYNC_ARGS=(
+  -avz --delete --timeout=120
+  # --chmod: file trong repo local có thể là 600 (umask của máy dev), rsync -a sẽ
+  # giữ nguyên và container (uid 50000) KHÔNG đọc được → PermissionError khi
+  # import. Chuẩn hoá về 644/755 ngay khi truyền.
+  --chmod=Du=rwx,Dg=rx,Do=rx,Fu=rw,Fg=r,Fo=r
+  -e "ssh -o StrictHostKeyChecking=no -o ConnectTimeout=20"
+  --exclude=.git
+  --exclude=.venv
+  --exclude=__pycache__
+  --exclude='*.pyc'
+  --exclude=logs/
+  --exclude=data/
+  --exclude=infra/.env
+  --exclude=infra/CREDENTIALS.txt
+  --exclude='*.bak'
+  --exclude='*.tar.gz'
+)
+
 echo "=========================================="
-echo "Pushing code to ${SERVER_IP}"
+echo " Deploy ${LOCAL_DIR} → ${SERVER_USER}@${SERVER_IP}:${REMOTE_DIR}"
+if [ "$DRY_RUN" = 1 ]; then echo " DRY-RUN (không thay đổi gì)"; else echo " THẬT"; fi
 echo "=========================================="
 
-# Create remote directory if needed
-sshpass -p "${SERVER_PASS}" ssh -o StrictHostKeyChecking=no ${SERVER_USER}@${SERVER_IP} "mkdir -p ${REMOTE_DIR}/data/raw/topcv ${REMOTE_DIR}/logs"
+if [ "$DRY_RUN" = 1 ]; then
+  echo "--- file sẽ BỊ XOÁ trên server ---"
+  sshpass -e rsync "${RSYNC_ARGS[@]}" --dry-run "$LOCAL_DIR/" "${SERVER_USER}@${SERVER_IP}:${REMOTE_DIR}/" \
+    | grep '^deleting' || echo "  (không có)"
+  echo "--- hết (bỏ --dry-run để deploy thật) ---"
+  exit 0
+fi
 
-# Sync code (excluding data, venv, __pycache__)
-sshpass -p "${SERVER_PASS}" rsync -avz --progress -e "ssh -o StrictHostKeyChecking=no" \
-    --exclude='.venv' \
-    --exclude='__pycache__' \
-    --exclude='*.pyc' \
-    --exclude='data/raw/topcv/*.csv' \
-    --exclude='data/raw/topcv/*.json' \
-    "${LOCAL_DIR}/" ${SERVER_USER}@${SERVER_IP}:${REMOTE_DIR}/
+echo "[1/4] rsync code..."
+sshpass -e rsync "${RSYNC_ARGS[@]}" "$LOCAL_DIR/" "${SERVER_USER}@${SERVER_IP}:${REMOTE_DIR}/"
+
+echo "[2/4] build image Airflow (có Playwright + Chromium)..."
+if [ "$BUILD" = 1 ]; then
+  $SSH "cd ${REMOTE_DIR}/infra && docker compose build"
+else
+  echo "  (bỏ qua theo --no-build)"
+fi
+
+echo "[3/4] compose up + đồng bộ venv host..."
+$SSH "set -e
+  cd ${REMOTE_DIR}
+  # quyền đọc cho container (uid 50000) — chỉ code, KHÔNG đụng infra/.env
+  chmod -R a+rX dags pipeline scripts tests docs deploy infra/grafana 2>/dev/null || true
+  chmod a+r infra/*.sql infra/*.yml infra/Dockerfile 2>/dev/null || true
+  chmod 600 infra/.env 2>/dev/null || true
+  docker compose -f infra/docker-compose.yml up -d
+  docker compose -f infra/docker-compose.yml ps
+  .venv/bin/pip install -q -r requirements.txt 2>/dev/null || true"
+
+echo "[4/4] health check..."
+$SSH "curl -s -o /dev/null -w '  airflow:%{http_code}\n' --max-time 20 http://localhost:8080/health
+      curl -s -o /dev/null -w '  grafana:%{http_code}\n' --max-time 20 http://localhost:3000/api/health"
 
 echo ""
-echo "=========================================="
-echo "Code pushed successfully!"
-echo "=========================================="
-echo ""
-echo "Next steps on server:"
+echo "Xong. Chạy pipeline tay trên server:"
 echo "  ssh ${SERVER_USER}@${SERVER_IP}"
-echo "  cd ${REMOTE_DIR}"
-echo "  source .venv/bin/activate"
-echo "  python -m pipeline run topcv"
+echo "  cd ${REMOTE_DIR} && set -a && . infra/.env && set +a && .venv/bin/python -m pipeline run topcv --load-db"

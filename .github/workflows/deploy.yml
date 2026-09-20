@@ -83,6 +83,7 @@ jobs:
           # 2 file secret (infra/.env, infra/CREDENTIALS.txt) — rsync không xoá
           # đường dẫn nằm trong --exclude.
           sshpass -e rsync -avz --delete --timeout=120 \
+            --chmod=Du=rwx,Dg=rx,Do=rx,Fu=rw,Fg=r,Fo=r \
             -e "ssh -o StrictHostKeyChecking=no -o ConnectTimeout=20" \
             --exclude='.git' \
             --exclude='.venv' \
@@ -104,6 +105,10 @@ jobs:
             ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} << 'EOF'
           set -e
           cd /mnt/kaggle_data/kaggle_pipeline
+          # quyền đọc cho container (uid 50000) — chỉ code, KHÔNG đụng infra/.env
+          chmod -R a+rX dags pipeline scripts tests docs deploy infra/grafana 2>/dev/null || true
+          chmod a+r infra/*.sql infra/*.yml infra/Dockerfile 2>/dev/null || true
+          chmod 600 infra/.env 2>/dev/null || true
           # infra: postgres + grafana + airflow (docutee đã trong group docker nên không cần sudo)
           docker compose -f infra/docker-compose.yml up -d
           # venv trên host chỉ để chạy tay `python -m pipeline run ...` (pipeline thật chạy trong Airflow container)
