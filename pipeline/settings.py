@@ -2,11 +2,10 @@
 
 Thay thế config rải rác ở pipeline/config.py (TopCV only).
 
-Schedule duy nhất là Airflow DAG dags/jobs_daily.py (không dùng cron).
-Trường `schedule` dưới đây chỉ để document, Airflow đọc schedule
-từ DAG (schedule="0 0 * * *").
+Scheduler là CRON: scripts/cron_daily.sh (07:00 ICT), cài qua deploy/setup_server.sh.
+Trường `schedule` dưới đây chỉ để document — crontab mới là source of truth.
 
-Mọi entrypoint (CLI, Airflow) đều đọc từ đây + env vars,
+Mọi entrypoint (CLI, cron) đều đọc từ đây + env vars,
 nên local và server chỉ khác env, không khác code.
 
 Env hỗ trợ:
@@ -44,7 +43,7 @@ class SourceSettings:
     name: str                       # "itviec" | "topcv"
     raw_subdir: str                 # thư mục raw dưới DATA_ROOT, vd "itviec"
     kaggle_dataset: str             # id đầy đủ "user/dataset"
-    schedule: str                   # document lịch Airflow (DAG là source of truth)
+    schedule: str                   # document lịch chạy (crontab là source of truth)
     default_max_pages: int | None   # None = toàn bộ
     default_workers: int = 4
     raw_prefix: str = ""            # tiền tố file raw: <prefix>_latest.json
@@ -57,7 +56,7 @@ SOURCES: dict[str, SourceSettings] = {
         name="itviec",
         raw_subdir="itviec",
         kaggle_dataset=os.getenv("ITVIEC_KAGGLE_DATASET", "quangcrawler/itviec-jobs"),
-        schedule="0 0 * * *",           # document theo DAG jobs_daily (07:00 ICT daily)
+        schedule="0 7 * * *",           # document: cron 07:00 ICT (scripts/cron_daily.sh)
         default_max_pages=None,     # scrape toàn bộ
         default_workers=4,
         raw_prefix="itviec_jobs",
@@ -69,7 +68,7 @@ SOURCES: dict[str, SourceSettings] = {
         kaggle_dataset=os.getenv(
             "TOPCV_KAGGLE_DATASET", f"{KAGGLE_USERNAME}/topcv-it-jobs-vietnam"
         ),
-        schedule="0 0 * * *",           # document theo DAG jobs_daily (07:00 ICT daily)
+        schedule="0 7 * * *",           # document: cron 07:00 ICT (scripts/cron_daily.sh)
         # Cloudflare của topcv chặn cứng các request phân trang (?page>=2 trả
         # "Attention Required!" ~4.8KB, không phụ thuộc delay) → chỉ lấy được
         # page 1 = 50 job mới nhất mỗi ngày; job cũ tích luỹ dần qua upsert.

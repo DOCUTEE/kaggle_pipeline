@@ -1,7 +1,7 @@
 # Unified Pipeline Pattern — 1 pattern cho mọi source
 
 Từ 2026-09-18, mọi nguồn (itviec, topcv, ...) chạy **đúng 1 pattern 6 bước**,
-schedule bằng **cron** (`scripts/cron_daily.sh`, 07:00 ICT) — Airflow là optional:
+schedule bằng **cron** (`scripts/cron_daily.sh`, 07:00 ICT):
 
 ```
 scrape → process → dashboard → [load_db] → kaggle_push → cleanup
@@ -15,8 +15,7 @@ orchestration giống nhau, mà cả storage / transform / dashboard / db / publ
 
 ```
 ┌───────────────────────────────────────────────────────────────────┐
-│  scripts/cron_daily.sh             (scheduler chính: cron 07:00)  │
-│  dags/jobs_daily.py                (optional — profile `airflow`)  │
+│  scripts/cron_daily.sh             (scheduler: cron 07:00 ICT)    │
 │  python -m pipeline run <source>   (chạy tay / debug)             │
 │  scripts/run_pipeline.sh           (chạy tay, KHÔNG schedule)     │
 └──────────────────────────────┬────────────────────────────────────┘
@@ -86,21 +85,19 @@ Snapshot raw cũ (`job_key`/`tags`/`posted_time`) vẫn process được nhờ
 2. Đăng ký 1 dòng trong `pipeline/sources/__init__.py`
    (`from pipeline.sources.topdev import TopdevSource`) + 1 entry trong
    `pipeline/settings.py::SOURCES`.
-3. Xong — CLI/DAG/dashboard/db tự nhận source mới.
+3. Xong — CLI/cron/dashboard/db tự nhận source mới.
    `tests/test_sources.py` fail nếu thiếu file/bước nào (có test chốt shape của package).
 
 ## Vận hành chuẩn (cron + Grafana)
 
 ```bash
-# infra: chỉ postgres + grafana (Airflow nằm sau profile, không chạy mặc định)
+# infra: postgres + grafana
 cd infra && docker compose up -d
 
 # scheduler: cron 07:00 ICT (cài bằng deploy/setup_server.sh)
 crontab -l
 ./scripts/cron_daily.sh          # chạy tay ngay, cùng code path với cron
-
-# cần UI/backfill thì bật Airflow (+1.25GB RAM):
-docker compose --profile airflow up -d    # http://localhost:8080
+                                 # retry 2 lần/source + log + flock, exit code cho alert
 ```
 
 ## Chạy tay / debug (không schedule)
@@ -135,9 +132,8 @@ uv run python -m pipeline run itviec|topcv|all [--load-db] [--no-kaggle]
 ```
 
 Không còn CLI `python -m pipeline.build`, `python -m pipeline.db`, `python -m itviec`.
-Scheduler hiện tại: **cron** `scripts/cron_daily.sh` (retry + log + flock).
-Airflow vẫn nằm trong repo nhưng tắt mặc định (compose profile `airflow`) —
-bật lại bằng `docker compose --profile airflow up -d` khi cần UI/backfill.
+Scheduler: **cron** `scripts/cron_daily.sh` (retry + log + flock + exit code).
+Airflow đã bị gỡ hoàn toàn khỏi repo (2026-09-20) — không còn DAG, image hay service.
 
 ## Config duy nhất
 

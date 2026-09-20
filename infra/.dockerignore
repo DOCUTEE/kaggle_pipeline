@@ -1,5 +1,0 @@
-# Không đưa secret vào build context
-.env
-CREDENTIALS.txt
-*.tar.gz
-*.log

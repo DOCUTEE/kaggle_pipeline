@@ -7,9 +7,8 @@ requires-python = ">=3.12"
 license = { text = "MIT" }
 # Workflow: uv sync (dựng .venv từ uv.lock) — KHÔNG pip install thủ công.
 # Thêm dep: sửa list dưới → uv lock → uv sync → uv export ... -o requirements.txt
-# requirements.txt chỉ để pip/airflow-container dùng; nguồn thật là file này + uv.lock.
-# Airflow chạy qua Docker (infra/docker-compose.yml, image apache/airflow:2.9.3),
-# không pip install airflow ở local (không dùng cron — scheduler duy nhất là DAG jobs_daily).
+# requirements.txt để pip trên server dùng (cron chạy bằng venv host); nguồn thật là
+# file này + uv.lock. Scheduler là cron (scripts/cron_daily.sh) — không dùng Airflow.
 dependencies = [
     "playwright>=1.40.0",
     "beautifulsoup4>=4.12.0",

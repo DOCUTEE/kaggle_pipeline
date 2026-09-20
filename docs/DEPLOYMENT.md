@@ -1,4 +1,4 @@
-# Deployment Guide (Airflow-only)
+# Deployment Guide (cron + Grafana)
 
 ## Server Info
 - **IP**: 100.80.131.68
@@ -23,13 +23,14 @@ ssh docutee@100.80.131.68
 
 ## Deploy
 ```bash
-# Từ local: sync code + gỡ cron cũ + dựng infra (postgres + grafana + airflow)
+# Từ local: sync code + dựng infra (postgres + grafana) + cài crontab
 ./deploy/setup_server.sh
 ```
 
 Chi tiết xem `deploy/setup_server.sh`: sync code tới
 `/mnt/kaggle_data/kaggle_pipeline`, xóa crontab legacy, chạy
-`infra/docker-compose.yml` (postgres + grafana + airflow).
+`infra/docker-compose.yml` (postgres + grafana), cài venv + Chromium và
+**cài crontab 07:00** (scheduler chính).
 
 ## CI/CD — chỉ `main` mới test + deploy, làm hàng ngày ở `develop`
 
@@ -53,9 +54,10 @@ dở/test đỏ không thể merge lên `main` = không bao giờ deploy bậy.
 Workflow `.github/workflows/deploy.yml` chạy mỗi khi push lên `main` qua 2 lớp:
 1. **test** — `pip install -r requirements.txt` + `python -m unittest discover -s tests -v`
    (Python 3.12 khớp server, offline, ~15s). Đỏ thì deploy không bao giờ chạy.
-2. **deploy** (`needs: [test]`) — rsync code (trừ `data/` + `logs/` + `.venv`
-   để không đè mất dataset server đang cào) → `docker compose up -d` →
-   reinstall deps → `docker compose up -d` → health check Airflow `:8080` + Grafana `:3000`.
+2. **deploy** (`needs: [test]`) — rsync code kèm `--delete` (trừ `data/`, `logs/`,
+   `.venv`, `infra/.env`, `infra/CREDENTIALS.txt`) → chmod quyền đọc cho container →
+   `docker compose up -d` (postgres + grafana) → health check Grafana `:3000` + kiểm tra
+   entry cron còn nguyên.
 
 Chạy test ở local trước khi push: `python -m unittest discover -s tests -v`.
 Bỏ qua 1 lần deploy: thêm `[skip deploy]` vào commit message (thêm
@@ -73,12 +75,12 @@ Bỏ qua 1 lần deploy: thêm `[skip deploy]` vào commit message (thêm
 Chưa có secrets nào thì workflow fail ở bước SSH — tạo đủ secrets rồi push lại
 (commit trống cũng được: `git commit --allow-empty -m "trigger deploy"`).
 
-## Pipeline (Airflow — scheduler duy nhất, không dùng cron)
+## Pipeline (cron — scheduler chính)
 
-- **DAG**: `jobs_daily`, schedule `0 0 * * *` (00:00 UTC = 07:00 ICT)
-- **UI**: http://100.80.131.68:8080 (admin/admin — đổi sau lần đầu)
-- **Trigger tay**: Airflow UI → `jobs_daily` → Trigger DAG
-- **Log**: Airflow UI → DAG → task `run_itviec` / `run_topcv` → Logs
+- **Crontab**: `0 7 * * *` → `scripts/cron_daily.sh` (07:00 ICT)
+- **Log**: `logs/pipeline_YYYY-MM-DD.log` (chi tiết) + `logs/cron.log` (stdout cron)
+- **Chạy tay ngay**: `./scripts/cron_daily.sh` (giống hệt cron, có retry + flock)
+- **Exit code**: 0 = tất cả source OK, 1 = có source lỗi (alert đọc được)
 
 ### Run Manually (debug, không schedule)
 ```bash
@@ -135,15 +137,16 @@ vẫn chạy được nhưng không cần nữa khi đã có env.
 ```bash
 # Local: chạy 1 source, để push bật (mặc định)
 python -m pipeline run topcv --max-pages 2
-# Server: Airflow UI → jobs_daily → Trigger, xem log task run_topcv tìm "Kaggle push SUCCESS"
+# Server: ./scripts/cron_daily.sh, rồi grep log tìm "Kaggle push SUCCESS"
 ```
 
 ## Monitoring
 
 ### View Logs
 ```bash
-# Airflow task logs: xem trên UI (khuyên dùng)
-# Infra logs (postgres / grafana / airflow)
+# Log pipeline (cron ghi ở đây)
+tail -f /mnt/kaggle_data/kaggle_pipeline/logs/pipeline_$(date +%F).log
+# Infra logs (postgres / grafana)
 docker compose -f /mnt/kaggle_data/kaggle_pipeline/infra/docker-compose.yml logs -f grafana
 
 # Manual run logs
@@ -183,6 +186,6 @@ playwright install chromium
 ```bash
 cd /mnt/kaggle_data/kaggle_pipeline/infra
 docker compose ps
-docker compose logs -f airflow-scheduler
-# Trigger tay trên UI để test, check task logs trên UI
+# Chạy tay để test (cùng code path với cron):
+/mnt/kaggle_data/kaggle_pipeline/scripts/cron_daily.sh
 ```

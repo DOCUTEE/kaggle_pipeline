@@ -4,7 +4,7 @@
 # Cài crontab (07:00 giờ VN, server để TZ Asia/Ho_Chi_Minh):
 #   0 7 * * * /mnt/kaggle_data/kaggle_pipeline/scripts/cron_daily.sh >> /mnt/kaggle_data/kaggle_pipeline/logs/cron.log 2>&1
 #
-# Script bù những thứ Airflow từng lo:
+# Script bù những gì một scheduler cần (vì không dùng Airflow nữa):
 #   - retry mỗi source vài lần (mặc định 2) trước khi báo fail
 #   - ghi log 1 file/ngày: logs/pipeline_YYYY-MM-DD.log
 #   - flock: lần chạy trước chưa xong thì bỏ qua, không chồng nhau
@@ -45,8 +45,8 @@ PY="$REPO_ROOT/.venv/bin/python"
 [ -x "$PY" ] || PY="$(command -v python3)"
 
 # ── preflight: data dir phải ghi được ───────────────────────────────────────
-# Volume này từng bị container Airflow (uid 50000) ghi trước, nên khi cron chạy
-# bằng user host (uid 1000) có thể bị PermissionError. Báo rõ thay vì fail mơ hồ.
+# Thư mục này từng được ghi bởi uid khác (container), nên cron chạy bằng user host
+# có thể bị PermissionError. Báo rõ thay vì fail mơ hồ.
 DATA_ROOT="${DATA_ROOT:-$REPO_ROOT/data}"
 mkdir -p "$DATA_ROOT" 2>/dev/null
 if ! ( : > "$DATA_ROOT/.write_test" ) 2>/dev/null; then

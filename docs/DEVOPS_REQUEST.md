@@ -10,9 +10,9 @@
 ## 1. Kiến trúc & luồng dữ liệu (để hiểu service nào dùng làm gì)
 
 ```
-Airflow DAG jobs_daily (00:00 UTC = 07:00 ICT, scheduler DUY NHẤT — không dùng cron)
+cron 07:00 ICT → scripts/cron_daily.sh (scheduler DUY NHẤT — không dùng Airflow)
         │
-        ▼  mỗi source 1 task:  python -m pipeline run <source> --load-db
+        ▼  mỗi source 1 lần:  python -m pipeline run <source> --load-db
    scrape ──> raw JSON ──> process ──> processed_jobs.json ──┬─> PostgreSQL ──> Grafana
    (itviec/topcv)                                            ├─> dashboard HTML tĩnh (Plotly)
                                                              └─> Kaggle dataset (JSON)
@@ -27,12 +27,11 @@ Không còn CSV, không còn web app Streamlit. **PostgreSQL là nguồn dữ li
 | # | Service | Version | Port (nội bộ) | Dùng cho | Ghi chú |
 |---|---|---|---|---|---|
 | 1 | **PostgreSQL** | 15+ | 5432 | Kho dữ liệu phân tích (`itviec_jobs`, `topcv_jobs` + views) | Schema ở `infra/init.sql` — **bắt buộc apply**, gồm cả `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` cho DB đã tồn tại |
-| 2 | **Airflow** *(optional — xem ghi chú dưới)* | 2.9.3 | 8080 | UI/backfill; **không phải scheduler chính nữa** | Bật bằng `docker compose --profile airflow up -d`. Scheduler chính là **cron** `scripts/cron_daily.sh` (07:00 ICT) |
-| 3 | **Airflow metadata DB** | PostgreSQL 15 | (nội bộ) | DB riêng cho Airflow | Trong compose đã có service `airflow-db`, không expose ra ngoài |
-| 4 | **Grafana** | latest | 3000 | Dashboard query trực tiếp Postgres | Datasource provisioning ở `infra/grafana/provisioning/datasources/postgres.yml` |
-| 5 | **Docker + Docker Compose** | v2 | — | Chạy 4 service trên | User deploy phải nằm trong group `docker` (compose hiện gọi không qua `sudo`) |
+| 2 | **Grafana** | latest | 3000 | Dashboard query trực tiếp Postgres | Datasource provisioning ở `infra/grafana/provisioning/datasources/postgres.yml` |
+| 3 | **cron** (trên host) | util-linux | — | **Scheduler duy nhất**: `scripts/cron_daily.sh` 07:00 ICT | Cài bằng `deploy/setup_server.sh`. Retry + log + flock + exit code |
+| 4 | **Docker + Docker Compose** | v2 | — | Chạy postgres + grafana | User deploy phải nằm trong group `docker` (compose gọi không qua `sudo`) |
 | 6 | **Kaggle API** (egress) | CLI `kaggle>=2.0` | — | Push dataset | Token mới dạng `KGAT_...`; `kaggle<2.0` **không dùng được token này** |
-| 7 | **Host venv** (tuỳ chọn) | Python 3.12 | — | Chạy tay `python -m pipeline run ...`, debug | `pip install -r requirements.txt` + `playwright install chromium` |
+| 6 | **Host venv** | Python 3.12 | — | cron + chạy tay `python -m pipeline run ...` | `pip install -r requirements.txt` + `playwright install chromium` (**bắt buộc** cho scraper topcv) |
 
 **Tài nguyên gợi ý (theo server hiện tại):** 8GB RAM / 1TB disk; dữ liệu raw ~2–5MB/source/ngày,
 retention 30 ngày (pipeline tự xoá snapshot cũ).
@@ -49,21 +48,21 @@ retention 30 ngày (pipeline tự xoá snapshot cũ).
 
 ## 3. Secrets / biến môi trường cần cấp
 
-Toàn bộ đọc từ env (`pipeline/settings.py`, `pipeline/db.py`, `dags/jobs_daily.py`).
+Toàn bộ đọc từ env (`pipeline/settings.py`, `pipeline/db.py`, `scripts/cron_daily.sh`).
 File mẫu: `infra/.env.example` → copy thành `infra/.env`, **không commit**.
 
-> **Scheduler chính = cron** (`scripts/cron_daily.sh`, cài qua `deploy/setup_server.sh`).
-> Airflow chỉ bật khi cần UI/backfill → tiết kiệm ~1.25GB RAM.
+> **Scheduler = cron** (`scripts/cron_daily.sh`, cài qua `deploy/setup_server.sh`).
+> Không dùng Airflow (đã gỡ khỏi repo 2026-09-20).
 >
 > **1 nguồn sự thật duy nhất:** `infra/.env`. Postgres container, Grafana datasource
-> (provisioning interpolate `${POSTGRES_*}`) và Airflow đều đọc cùng file này —
+> (provisioning interpolate `${POSTGRES_*}`) và cron đều đọc cùng file này —
 > đổi password chỉ cần sửa 1 chỗ, không sửa code/compose.
 
 | Biến | Ví dụ | Dùng ở đâu | Bắt buộc |
 |---|---|---|---|
-| `POSTGRES_DB` | `kaggle_pipeline` | postgres container, Grafana datasource, Airflow `DB_NAME` | ✅ |
-| `POSTGRES_USER` | `pipeline` | postgres container, Grafana datasource, Airflow `DB_USER` | ✅ |
-| `POSTGRES_PASSWORD` | *(secret)* | postgres container, Grafana datasource, Airflow `DB_PASSWORD` | ✅ |
+| `POSTGRES_DB` | `kaggle_pipeline` | postgres container, Grafana datasource, cron (`DB_NAME`) | ✅ |
+| `POSTGRES_USER` | `pipeline` | postgres container, Grafana datasource, cron (`DB_USER`) | ✅ |
+| `POSTGRES_PASSWORD` | *(secret)* | postgres container, Grafana datasource, cron (`DB_PASSWORD`) | ✅ |
 | `DB_HOST` | `postgres` (trong compose) / IP thật | `pipeline/db.py` | ✅ |
 | `DB_PORT` | `5432` | `pipeline/db.py` | ✅ |
 | `DB_NAME` | = `POSTGRES_DB` | `pipeline/db.py` | ✅ |
@@ -104,14 +103,13 @@ init.sql đã apply?        [ ] có   [ ] chưa  → nếu chưa: docker exec -i
 bảng đã tồn tại?          [ ] itviec_jobs  [ ] topcv_jobs  [ ] views (v_itviec_stats, v_skill_stats, v_daily_counts)
 ```
 
-### 4.2 Airflow
+### 4.2 Scheduler (cron) + quyền ghi data
 ```
-URL             = ................   (vd http://<host>:8080)
-username        = ................
-password        = ................
-DAG jobs_daily đã hiện trong UI?      [ ] có  [ ] chưa
-env trong container scheduler (output của: docker exec <airflow-scheduler> env | grep -E 'PROJECT_ROOT|DATA_ROOT|DB_|PIPELINE_|KAGGLE_')
-   ..............................................................
+crontab đã cài?            [ ] có  [ ] chưa     (output: crontab -l)
+entry mong đợi: 0 7 * * * /mnt/kaggle_data/kaggle_pipeline/scripts/cron_daily.sh >> .../logs/cron.log 2>&1
+log gần nhất:  ................................................ (logs/pipeline_YYYY-MM-DD.log)
+data/ ghi được bởi user chạy cron?   [ ] có  [ ] chưa
+   → nếu chưa: sudo chown -R <user>:<user> /mnt/kaggle_data/kaggle_pipeline/data
 ```
 
 ### 4.3 Grafana
@@ -142,7 +140,7 @@ Quyền: user thuộc group docker?  [ ] có  [ ] chưa
 ### 4.6 Môi trường
 ```
 [ ] Đây là production   [ ] staging/dev
-Có cần alert khi pipeline fail không? (Airflow email/Slack)  [ ] có  [ ] không
+Có cần alert khi pipeline fail không? (cron mail / Slack webhook)  [ ] có  [ ] không
 Backup Postgres định kỳ?  [ ] có (tần suất: ......)  [ ] không
 ```
 
@@ -188,8 +186,8 @@ docker exec -it kaggle_postgres psql -U pipeline -d kaggle_pipeline \
   -c "SELECT COUNT(*) FROM itviec_jobs;" \
   -c "SELECT source, COUNT(*) FROM topcv_jobs GROUP BY source;"
 
-# 3. Airflow: trigger DAG và xem 2 task run_itviec / run_topcv xanh
-docker exec kaggle_airflow_scheduler airflow dags trigger jobs_daily
+# 3. Scheduler: chạy đúng cái cron sẽ chạy, xem log
+/mnt/kaggle_data/kaggle_pipeline/scripts/cron_daily.sh; tail -20 ../logs/pipeline_$(date +%F).log
 
 # 4. Grafana: mở dashboard, xác nhận có data
 ```
@@ -207,13 +205,13 @@ git clone <repo> /mnt/kaggle_data/kaggle_pipeline   # hoặc rsync từ CI
 cd /mnt/kaggle_data/kaggle_pipeline
 cp infra/.env.example infra/.env && vi infra/.env    # điền secret thật (chmod 600)
 
-cd infra && docker compose up -d                     # postgres + grafana + airflow(+db)
+cd infra && docker compose up -d                     # postgres + grafana
 docker compose ps                                    # tất cả phải "healthy"/"running"
 
 # apply schema (compose tự chạy init.sql khi volume MỚI; DB cũ thì apply tay)
 docker exec -i kaggle_postgres psql -U pipeline -d kaggle_pipeline < init.sql
 
-# host venv (để chạy tay; pipeline trong Airflow đã có dep qua _PIP_ADDITIONAL_REQUIREMENTS)
+# host venv — cron chạy bằng venv này nên BẮT BUỘC có
 cd .. && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/playwright install chromium                # bắt buộc cho scraper topcv
 ```
@@ -224,7 +222,7 @@ cd .. && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 - `infra/.env` phải `chmod 600` và **không commit** (đã nằm trong `.gitignore`).
 - Backup volume `pgdata` — Postgres là nơi duy nhất chứa dữ liệu đã transform
   (raw JSON vẫn còn trên disk nhưng không có index/query).
-- Airflow mount repo + `dags/` ở chế độ **read-only**; code chỉ deploy qua CI/rsync.
+- Code chỉ deploy qua CI/rsync (`deploy/push_to_server.sh` cũng chạy được tay); data/ và logs/ không bị sync đè.
 
 ---
 

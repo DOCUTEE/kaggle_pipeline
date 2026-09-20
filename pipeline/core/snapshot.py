@@ -44,7 +44,7 @@ def split_list(value: Any) -> list[str]:
     return [part.strip() for part in text.split(LIST_SEP) if part.strip()]
 
 
-#: Mode cho file ghi ra volume dùng chung (host user + Airflow container khác uid).
+#: Mode cho file ghi ra volume dùng chung (host cron + container khác uid nếu có).
 #: mkstemp mặc định tạo 0600 → user khác không đọc được; 0664 cho phép đọc/rename.
 SHARED_FILE_MODE = 0o664
 
@@ -53,8 +53,8 @@ def _atomic_write(path: Path, writer) -> None:
     """Ghi qua temp file cùng thư mục rồi `os.replace()` (atomic trên POSIX).
 
     Dùng `os.replace` nên ghi đè được cả file của user khác (rename chỉ cần quyền
-    trên thư mục) — quan trọng vì volume này được ghi bởi cả host user lẫn
-    Airflow container (uid 50000).
+    trên thư mục) — cần thiết vì thư mục data/ từng được ghi bởi uid khác
+    (container), không phải lúc nào cũng cùng user với tiến trình hiện tại.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")

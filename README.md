@@ -15,7 +15,6 @@
 | Dashboard | URL |
 |-----------|-----|
 | **Grafana** (query Postgres: `itviec_jobs`, `topcv_jobs`) | http://100.80.131.68:3000 |
-| **Airflow** (optional, tắt mặc định) | http://100.80.131.68:8080 |
 
 > Dữ liệu phân tích được query trực tiếp từ **PostgreSQL** — không còn file CSV
 > và không còn app Streamlit.
@@ -26,7 +25,7 @@
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│              CRON 07:00 ICT → scripts/cron_daily.sh               │
+│                       CRON 07:00 ICT → scripts/cron_daily.sh      │
 ├─────────────────────────────────────────────────────────┤
 │                                                         │
 │  ┌──────────┐    ┌──────────┐    ┌──────────┐          │
@@ -70,9 +69,8 @@ kaggle_pipeline/
 │   ├── itviec/  adapter · client · models · parser · scraper    (requests + BS4)
 │   └── topcv/   adapter · client · models · parser · scraper    (Playwright)
 │
-├── scripts/cron_daily.sh           # SCHEDULER chính: cron 07:00 (retry+log+flock)
-├── dags/jobs_daily.py              # Airflow DAG — optional (profile `airflow`)
-├── infra/                          # docker compose: postgres + grafana + airflow
+├── scripts/cron_daily.sh           # SCHEDULER: cron 07:00 (retry+log+flock+exit code)
+├── infra/                          # docker compose: postgres + grafana (scheduler là cron)
 ├── deploy/                         # deploy thủ công lên server
 ├── scripts/run_pipeline.sh         # chạy tay / debug (không schedule)
 ├── tests/                          # unittest offline: core + contract + runner (CI chạy trước khi deploy)
@@ -198,11 +196,8 @@ docker compose -f infra/docker-compose.yml up -d
 crontab -l
 tail -f logs/pipeline_$(date +%F).log      # log của lần chạy
 
-# Chạy tay ngay:
+# Chạy tay ngay (cùng code path với cron):
 ./scripts/cron_daily.sh
-
-# Airflow KHÔNG chạy mặc định (tiết kiệm ~1.25GB RAM). Cần UI/backfill thì bật:
-cd infra && docker compose --profile airflow up -d   # http://<host>:8080 (admin/admin)
 ```
 
 ### Deploy Workflow

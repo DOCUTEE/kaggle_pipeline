@@ -11,7 +11,7 @@ tên source**: mọi khác biệt nằm trong package `pipeline/sources/<ten>/`.
     6. cleanup     (xoá snapshot > keep_days)
 
 Mọi entrypoint đều gọi vào đây:
-    - Airflow: dags/jobs_daily.py (scheduler duy nhất)
+    - cron: scripts/cron_daily.sh (07:00 ICT) — cài qua deploy/setup_server.sh
     - Manual:  python -m pipeline run itviec|topcv|all, scripts/run_pipeline.sh
 """
 

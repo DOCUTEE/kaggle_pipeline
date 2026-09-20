@@ -106,14 +106,14 @@ jobs:
           set -e
           cd /mnt/kaggle_data/kaggle_pipeline
           # quyền đọc cho container (uid 50000) — chỉ code, KHÔNG đụng infra/.env
-          chmod -R a+rX dags pipeline scripts tests docs deploy infra/grafana 2>/dev/null || true
+          chmod -R a+rX pipeline scripts tests docs deploy infra/grafana 2>/dev/null || true
           chmod a+r infra/*.sql infra/*.yml infra/Dockerfile 2>/dev/null || true
           chmod 600 infra/.env 2>/dev/null || true
-          # data/ được ghi bởi 2 uid khác nhau: cron (host, 1000) và Airflow container (50000)
+          # data/ có thể chứa file của uid khác (container cũ) → mở quyền cho cron ghi được
           chmod -R a+rwX data 2>/dev/null || true
-          # infra: postgres + grafana + airflow (docutee đã trong group docker nên không cần sudo)
+          # infra: postgres + grafana (docutee đã trong group docker nên không cần sudo)
           docker compose -f infra/docker-compose.yml up -d
-          # venv trên host chỉ để chạy tay `python -m pipeline run ...` (pipeline thật chạy trong Airflow container)
+          # venv trên host: cron + chạy tay `python -m pipeline run ...`
           source .venv/bin/activate 2>/dev/null || python3 -m venv .venv
           pip install -q -r requirements.txt
           docker compose -f infra/docker-compose.yml ps

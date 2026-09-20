@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Manual runner — chạy tay 1 source để debug, KHÔNG dùng để schedule.
-# Schedule duy nhất là Airflow DAG dags/jobs_daily.py (infra/docker-compose.yml).
+# Schedule chính là cron: scripts/cron_daily.sh (07:00 ICT).
 #
 # Usage:
 #   ./scripts/run_pipeline.sh itviec|topcv|all [--load-db] [--no-kaggle] [--max-pages N]
 #   ./scripts/run_pipeline.sh itviec --data-dir /mnt/kaggle_data/itviec --load-db
 #
-# Trigger định kỳ: mở Airflow UI (http://localhost:8080) → DAG jobs_daily → Trigger.
+# Chạy định kỳ: xem crontab -l, hoặc chạy tay ./scripts/cron_daily.sh.
 #
 # Env:
 #   PROJECT_ROOT / DATA_ROOT / LOG_DIR / KAGGLE_USERNAME / DB_* (xem pipeline/settings.py)
@@ -28,7 +28,7 @@ mkdir -p "$LOG_DIR"
 
 echo "============================================"
 echo " Manual run — source=$SOURCE — $(date '+%Y-%m-%d %H:%M:%S')"
-echo " (schedule chính: Airflow DAG jobs_daily)"
+echo " (schedule chính: cron 07:00 — scripts/cron_daily.sh)"
 echo "============================================"
 
 cd "$PROJECT_ROOT"

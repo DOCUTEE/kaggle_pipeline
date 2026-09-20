@@ -1,5 +1,5 @@
 #!/bin/bash
-# Setup server environment — scheduler là CRON (Airflow chỉ là optional profile).
+# Setup server environment — scheduler là CRON (không dùng Airflow).
 # Usage: ./deploy/setup_server.sh
 #
 # Chạy 1 lần cho server mới. Các lần deploy code bình thường dùng
@@ -55,7 +55,7 @@ else
 fi
 EOF
 
-# 3. Infra: chỉ postgres + grafana (Airflow nằm sau profile `airflow`)
+# 3. Infra: postgres + grafana
 echo "[3/5] Starting infra (postgres + grafana)..."
 sshpass -p "${SERVER_PASS}" ssh -o StrictHostKeyChecking=no ${SERVER_USER}@${SERVER_IP} << 'EOF'
 cd /mnt/kaggle_data/kaggle_pipeline/infra
@@ -100,6 +100,4 @@ echo "Setup Complete (cron + Grafana)"
 echo "=========================================="
 echo "Scheduler: cron 07:00 hàng ngày (log: ${REMOTE_DIR}/logs/pipeline_YYYY-MM-DD.log)"
 echo "Grafana:   http://${SERVER_IP}:3000 (query trực tiếp Postgres)"
-echo "Airflow (optional, +1.25GB RAM):"
-echo "  ssh ${SERVER_USER}@${SERVER_IP} 'cd ${REMOTE_DIR}/infra && docker compose --profile airflow up -d'"
 echo "SSH: ssh ${SERVER_USER}@${SERVER_IP}"
