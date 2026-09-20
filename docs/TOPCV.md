@@ -75,16 +75,16 @@ topcv có ~2.700 job IT / ~55 page. **Playwright thường KHÔNG phân trang đ
 từ `?page=2` Cloudflare trả trang `Attention Required!` (~4.8KB, 0 job) — đo trực
 tiếp: không phụ thuộc delay (3s→45s), click link phân trang cũng bị chặn.
 
-**Cách xử lý:** dùng backend **CloakBrowser** (`pipeline/sources/topcv/client.py`,
-env `TOPCV_BROWSER=cloak|playwright`, mặc định `cloak`) — Chromium được patch
-fingerprint ở tầng C++ nên qua được Cloudflare và **phân trang chạy bình thường**
-(đo: 5 page liên tiếp → 250 job, không trùng nhau).
+**Cách xử lý:** dùng **CloakBrowser** (`pipeline/sources/topcv/client.py`) —
+Chromium được patch fingerprint ở tầng C++ nên qua được Cloudflare và **phân trang
+chạy bình thường** (đo thật: 55 page → 2.698 job unique).
 
 - `default_max_pages = 60` (~3.000 job) — cap để tránh chạy vô hạn.
 - Delay giữa các page: `PAGE_DELAY_RANGE = (1.5, 3.0)` giây.
 - Không cần vào trang chi tiết: toàn bộ field lấy từ card ở trang listing.
-- Nếu CloakBrowser hỏng/bị chặn: đặt `TOPCV_BROWSER=playwright` để quay lại
-  (khi đó chỉ lấy được page 1, job tích luỹ dần qua upsert theo `job_id`).
+- CloakBrowser tự tải Chromium riêng (~200MB, cache `~/.cloakbrowser`) ở lần chạy
+  đầu — không cần `playwright install chromium` (nhưng vẫn cần system deps của
+  Chromium: `playwright install-deps chromium`).
 
 ## Dependencies
 - playwright

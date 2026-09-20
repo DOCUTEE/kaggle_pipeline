@@ -296,7 +296,7 @@ chmod 600 ~/.kaggle/kaggle.json
 | **One pattern per source** | Mỗi source là 1 package `pipeline/sources/<ten>/` (`adapter/scraper/client/parser/models.py`) implement 6 method; storage/transform/dashboard/db/publish dùng chung ở `pipeline/core/`. Runner không có `if source == ...` |
 | **Conformed schema** | Cả 2 nguồn ra `processed_jobs.json` cùng cột core (`job_id, title, company, salary, location_clean, skills, seniority, posted_hours_ago, skill_categories, ...`) → join/so sánh chéo được |
 | **Respect robots.txt** | Verified allowed; polite rate limiting with jitter |
-| **Cloudflare bypass** | itviec: requests + BS4 · topcv: **CloakBrowser** (Chromium patch fingerprint ở tầng C++, mặc định) — Playwright chỉ là fallback qua env `TOPCV_BROWSER=playwright` |
+| **Cloudflare bypass** | itviec: requests + BS4 · topcv: **CloakBrowser** (Chromium patch fingerprint ở tầng C++) — cần để phân trang qua Cloudflare |
 | **Atomic writes** | Temp file + `os.replace()` prevents corruption |
 | **Idempotent runs** | Dedup by job_id; re-runs overwrite same snapshot |
 | **Error handling** | Retry with backoff, fail gracefully |

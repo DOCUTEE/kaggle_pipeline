@@ -215,43 +215,50 @@ class TestTopcvRealMarkup(unittest.TestCase):
         self.assertEqual(parse_total_pages('<html><ul class="pagination">Trang 1</ul></html>'), 1)
 
 
-class TestTopcvBrowserBackend(unittest.TestCase):
-    """2 backend dùng chung 1 API (Playwright) — parser/scraper không cần biết."""
+class TestTopcvBrowser(unittest.TestCase):
+    """Client dùng CloakBrowser (Chromium patch fingerprint) — API Playwright."""
 
-    def test_default_backend_is_cloak(self):
+    def test_start_launches_cloakbrowser(self):
+        import types
         from unittest import mock
-        from pipeline.sources.topcv.client import DEFAULT_BACKEND, TopCvBrowser
 
-        with mock.patch.dict("os.environ", {}, clear=False):
-            import os
-            os.environ.pop("TOPCV_BROWSER", None)
-            self.assertEqual(DEFAULT_BACKEND, "cloak")
-            self.assertEqual(TopCvBrowser().backend, "cloak")
-
-    def test_env_can_switch_to_playwright(self):
-        from unittest import mock
         from pipeline.sources.topcv.client import TopCvBrowser
 
-        with mock.patch.dict("os.environ", {"TOPCV_BROWSER": "playwright"}):
-            self.assertEqual(TopCvBrowser().backend, "playwright")
+        page = object()
+        fake_browser = mock.Mock()
+        fake_browser.new_page.return_value = page
+        fake_module = types.SimpleNamespace(launch=mock.Mock(return_value=fake_browser))
 
-    def test_explicit_backend_wins_over_env(self):
-        from unittest import mock
+        with mock.patch.dict("sys.modules", {"cloakbrowser": fake_module}):
+            browser = TopCvBrowser(headless=True)
+            browser.start()
+
+        fake_module.launch.assert_called_once_with(headless=True)
+        fake_browser.new_page.assert_called_once()
+        self.assertIs(browser.page, page)
+
+    def test_stop_is_idempotent_and_survives_errors(self):
         from pipeline.sources.topcv.client import TopCvBrowser
 
-        with mock.patch.dict("os.environ", {"TOPCV_BROWSER": "playwright"}):
-            self.assertEqual(TopCvBrowser(backend="cloak").backend, "cloak")
+        browser = TopCvBrowser()
+        browser.stop()          # chưa start cũng không được lỗi
 
-    def test_start_dispatches_to_chosen_backend(self):
-        from unittest import mock
-        from pipeline.sources.topcv.client import TopCvBrowser
+        broken = TopCvBrowser()
+        broken.browser = type("B", (), {"close": staticmethod(lambda: (_ for _ in ()).throw(RuntimeError("boom")))})()
+        broken.stop()           # lỗi khi đóng không được làm chết run
+        self.assertIsNone(broken.browser)
+        self.assertIsNone(broken.page)
 
-        for backend, method in (("cloak", "_start_cloak"), ("playwright", "_start_playwright")):
-            browser = TopCvBrowser(backend=backend)
-            with mock.patch.object(TopCvBrowser, method) as called, \
-                 mock.patch.object(TopCvBrowser, "_start_cloak" if backend != "cloak" else "_start_playwright"):
-                browser.start()
-                called.assert_called_once()
+    def test_no_playwright_backend_left(self):
+        """Đã bỏ fallback: không còn nhánh/param backend nào."""
+        import inspect
+
+        from pipeline.sources.topcv import client
+
+        src = inspect.getsource(client)
+        self.assertNotIn("_start_playwright", src)
+        self.assertNotIn("sync_playwright", src)
+        self.assertNotIn("TOPCV_BROWSER", src)
 
 
 class TestTopcvPageFailure(unittest.TestCase):

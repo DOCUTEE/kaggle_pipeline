@@ -75,7 +75,10 @@ cd /mnt/kaggle_data/kaggle_pipeline
 source .venv/bin/activate 2>/dev/null || python3 -m venv .venv && source .venv/bin/activate
 pip install --upgrade pip -q
 pip install -r requirements.txt -q
-playwright install chromium || true
+# CloakBrowser tự tải Chromium riêng (~200MB) — KHÔNG cần `playwright install chromium`
+python -m cloakbrowser install || true
+# system libs cho Chromium (CloakBrowser dùng binary của nó, không dùng chromium của playwright)
+playwright install-deps chromium 2>/dev/null || true
 # Dọn tiến trình Streamlit cũ (dashboard đã bỏ — dữ liệu query qua Postgres/Grafana)
 pkill -f '[s]treamlit run dashboard' 2>/dev/null || true
 EOF
