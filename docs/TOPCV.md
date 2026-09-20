@@ -69,6 +69,18 @@ Sửa `pipeline/settings.py` (entry `SOURCES["topcv"]`) hoặc override bằng e
 Daily 00:00 UTC = 07:00 ICT qua DAG `jobs_daily`
 (`dags/jobs_daily.py`, task `run_topcv`). Trigger tay trên Airflow UI.
 
+## ⚠️ Giới hạn: Cloudflare chặn phân trang
+
+Đo trực tiếp 2026-09-20: `?page=2` (và mọi page sau) trả trang
+`Attention Required! | Cloudflare` (~4.8KB, 0 job) — **không phụ thuộc delay**
+(đã thử 3s → 45s) và click link phân trang cũng bị chặn. Page 1 thì tải bình
+thường (~1.9MB, 50 job).
+
+Vì vậy `default_max_pages = 1` cho topcv: mỗi ngày lấy **50 job mới nhất**;
+các job trùng được upsert theo `job_id` trong Postgres nên dữ liệu vẫn tích luỹ
+theo thời gian. Code vẫn hỗ trợ nhiều page (`--max-pages N`) — khi có proxy
+hoặc Cloudflare nới lỏng thì chỉ cần tăng tham số, không phải sửa code.
+
 ## Dependencies
 - playwright
 - beautifulsoup4

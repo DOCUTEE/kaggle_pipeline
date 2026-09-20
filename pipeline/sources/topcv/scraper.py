@@ -54,16 +54,26 @@ class TopCvScraper:
 
     # ------------------------------------------------------------------
     def scrape_page(self, page_num: int = 1) -> list[Job]:
-        """Scrape 1 page: mở trang → chờ Cloudflare → parse."""
+        """Scrape 1 page: mở trang → chờ Cloudflare → parse.
+
+        Raise nếu không thấy card nào: thực tế gặp trang challenge Cloudflare
+        ("Attention Required!") trả HTML nhỏ không có job — nếu coi là thành công
+        thì page đó lặng lẽ mất dữ liệu. Raise để orchestrator retry.
+        """
         url = build_search_url(page=page_num)
         print(f"  Fetching page {page_num}: {url}")
 
         self.browser.open(url)
-        self.browser.wait_for_cloudflare()
-        if not self.browser.wait_for_job_list():
-            print(f"  Warning: Job list selector not found on page {page_num}")
-
-        return parse_jobs(self.browser.html())
+        if not self.browser.wait_for_cloudflare():
+            print(f"  Warning: Cloudflare chưa qua ở page {page_num}")
+        found = self.browser.wait_for_job_list()
+        jobs = parse_jobs(self.browser.html())
+        if not jobs:
+            reason = "hết kết quả" if found else "không thấy card job (Cloudflare/JS chưa render?)"
+            raise RuntimeError(f"page {page_num}: 0 job — {reason}")
+        if not found:
+            print(f"  Warning: Job list selector not found on page {page_num} (vẫn parse được {len(jobs)} job)")
+        return jobs
 
     def scrape_all(self, max_pages: int = 50) -> tuple[ScrapeStats, list[Job]]:
         """Scrape toàn bộ page (tối đa `max_pages`). Trả `(stats, jobs)`."""

@@ -70,7 +70,11 @@ SOURCES: dict[str, SourceSettings] = {
             "TOPCV_KAGGLE_DATASET", f"{KAGGLE_USERNAME}/topcv-it-jobs-vietnam"
         ),
         schedule="0 0 * * *",           # document theo DAG jobs_daily (07:00 ICT daily)
-        default_max_pages=50,
+        # Cloudflare của topcv chặn cứng các request phân trang (?page>=2 trả
+        # "Attention Required!" ~4.8KB, không phụ thuộc delay) → chỉ lấy được
+        # page 1 = 50 job mới nhất mỗi ngày; job cũ tích luỹ dần qua upsert.
+        # Muốn lấy sâu hơn: tăng số này khi có proxy/nguồn khác.
+        default_max_pages=1,
         default_workers=1,          # Playwright chạy tuần tự
         raw_prefix="topcv_jobs",
         dashboard_html="topcv_dashboard.html",

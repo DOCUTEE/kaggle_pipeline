@@ -20,8 +20,11 @@ from pipeline.sources.topcv.parser import (  # noqa: E402
     parse_job_card,
     parse_jobs,
     parse_total_pages,
+    select_job_cards,
 )
 from pipeline.sources.topcv.scraper import TopCvScraper  # noqa: E402
+
+from bs4 import BeautifulSoup  # noqa: E402
 
 
 def card(job_id: str, title: str, company: str = "ACME") -> str:
@@ -166,6 +169,80 @@ class TestTopcvScraper(unittest.TestCase):
     def test_dedupe_keeps_first_occurrence(self):
         jobs = [Job(job_id="1", title="first"), Job(job_id="1", title="second"), Job(url="u", title="x")]
         self.assertEqual([j.title for j in TopCvScraper._dedupe(jobs)], ["first", "x"])
+
+
+class TestTopcvRealMarkup(unittest.TestCase):
+    """Chốt selector theo HTML THẬT của topcv.vn (lưu 2026-09-20).
+
+    Fixture là 1 card thật đã lược attribute rác; nếu topcv đổi markup thì test
+    này fail trước khi pipeline âm thầm scrape ra 0 job.
+    """
+
+    FIXTURE = Path(__file__).parent / "fixtures" / "topcv_card_real.html"
+
+    def setUp(self):
+        self.html = self.FIXTURE.read_text(encoding="utf-8")
+
+    def test_parse_real_card_fields(self):
+        job = parse_job_card(self.html)
+        self.assertIsNotNone(job)
+        self.assertEqual(job.job_id, "2294584")
+        self.assertEqual(job.title, "Sales/Presales/Telesales Lead")
+        self.assertEqual(job.company, "Công ty TNHH ITECHWX")
+        self.assertEqual(job.salary, "Tới 33 triệu")
+        self.assertEqual(job.location, "Hà Nội")
+        self.assertEqual(job.posted_date, "Đăng 1 tuần trước")
+        self.assertTrue(job.is_hot)
+        self.assertTrue(job.url.startswith("https://www.topcv.vn/viec-lam/"))
+        # lương nằm trong <label class="salary"> — bản cũ chỉ tìm span/div nên hụt field
+        self.assertTrue(job.experience)
+        self.assertTrue(job.skills)
+
+    def test_select_job_cards_real_markup(self):
+        listing = f'<html><body><div class="wrapper">{self.html}{self.html}</div></body></html>'
+        soup = BeautifulSoup(listing, "lxml")
+        self.assertEqual(len(select_job_cards(soup)), 2)
+
+    def test_parse_jobs_real_markup(self):
+        listing = f'<html><body>{self.html}{self.html.replace("2294584", "9999999")}</body></html>'
+        jobs = parse_jobs(listing)
+        self.assertEqual([j.job_id for j in jobs], ["2294584", "9999999"])
+
+    def test_parse_total_pages_real_format(self):
+        """topcv render '1 / 55 trang', không có link ?page= như markup cũ."""
+        html = '<html><ul class="pagination"><li>1 /&nbsp;55 trang</li></ul></html>'
+        self.assertEqual(parse_total_pages(html), 55)
+        self.assertEqual(parse_total_pages('<html><ul class="pagination">Trang 1</ul></html>'), 1)
+
+
+class TestTopcvPageFailure(unittest.TestCase):
+    """0 job phải bị coi là page lỗi để orchestrator retry, không im lặng bỏ qua."""
+
+    def test_scrape_page_raises_on_zero_jobs(self):
+        class EmptyBrowser(FakeBrowser):
+            def html(self):
+                return "<html><body>Attention Required! | Cloudflare</body></html>"
+
+        scraper = TopCvScraper(headless=True, page_delay_range=(0, 0), retry_delay_s=0)
+        scraper.browser = EmptyBrowser({})
+        with contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(RuntimeError):
+                scraper.scrape_page(2)
+
+    def test_scrape_all_marks_empty_page_as_failed(self):
+        empty = "<html><body>Attention Required! | Cloudflare</body></html>"
+        pages = {
+            1: f"<html><body>{card('1', 'A')}{PAGINATION}</body></html>",
+            2: empty,   # cả lần đầu lẫn lần retry đều rỗng
+            3: empty,
+        }
+        scraper = TopCvScraper(headless=True, page_delay_range=(0, 0), retry_delay_s=0)
+        scraper.browser = FakeBrowser(pages)
+        with contextlib.redirect_stdout(io.StringIO()):
+            stats, jobs = scraper.scrape_all(max_pages=2)
+
+        self.assertEqual(stats.pages_failed, [2])
+        self.assertEqual([j.title for j in jobs], ["A"])
 
 
 if __name__ == "__main__":

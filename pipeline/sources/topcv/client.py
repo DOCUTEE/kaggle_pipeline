@@ -27,7 +27,9 @@ DEFAULT_PARAMS = {
 }
 
 #: Selector chờ danh sách job render xong.
-JOB_LIST_SELECTOR = ".job-list-search, .job-item, .search-result, [class*='job-card']"
+#: Lưu ý: CSS class selector khớp theo TỪNG token — `.job-item` KHÔNG khớp
+#: `job-item-search-result` (markup thật của topcv), nên phải liệt kê cả hai.
+JOB_LIST_SELECTOR = ".job-item-search-result, .job-list-search, .job-item, [data-job-id]"
 
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
@@ -100,27 +102,33 @@ class TopCvBrowser:
         assert self.page is not None, "TopCvBrowser chưa start()"
         self.page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
 
-    def wait_for_cloudflare(self, timeout_s: int = 15) -> bool:
-        """Chờ challenge Cloudflare xong. Trả False nếu quá hạn."""
+    def wait_for_cloudflare(self, timeout_s: int = 30) -> bool:
+        """Chờ challenge Cloudflare xong. Trả False nếu quá hạn.
+
+        Trang chặn thật gặp phải: "Attention Required! | Cloudflare" (chặn hẳn)
+        và "Just a moment..." (đang giải challenge).
+        """
         assert self.page is not None, "TopCvBrowser chưa start()"
+        blocked_markers = ("cloudflare", "checking", "attention required", "just a moment")
         start = time.time()
         while time.time() - start < timeout_s:
-            title = self.page.title()
-            if "cloudflare" not in title.lower() and "checking" not in title.lower():
-                return True
-            challenge = self.page.query_selector(
-                "#challenge-running, #challenge-form, .cf-browser-verification"
-            )
-            if not challenge:
+            title = self.page.title().lower()
+            # Chỉ dựa vào title: trang chặn "Attention Required! | Cloudflare" KHÔNG có
+            # #challenge-form, nên nếu thoát sớm theo element sẽ báo "đã qua" sai.
+            if not any(marker in title for marker in blocked_markers):
                 return True
             time.sleep(1)
         return False
 
-    def wait_for_job_list(self, *, timeout_ms: int = 15000) -> bool:
-        """Chờ danh sách job render. Trả False nếu không thấy (trang rỗng/đổi layout)."""
+    def wait_for_job_list(self, *, timeout_ms: int = 25000) -> bool:
+        """Chờ card job có trong DOM. Trả False nếu quá hạn.
+
+        Dùng `state="attached"`: mặc định của Playwright là "visible", mà topcv
+        render card trong container chưa hiện → chờ visible sẽ timeout dù DOM đã có.
+        """
         assert self.page is not None, "TopCvBrowser chưa start()"
         try:
-            self.page.wait_for_selector(JOB_LIST_SELECTOR, timeout=timeout_ms)
+            self.page.wait_for_selector(JOB_LIST_SELECTOR, state="attached", timeout=timeout_ms)
             return True
         except Exception:  # noqa: BLE001 — timeout của Playwright
             return False
