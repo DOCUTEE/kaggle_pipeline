@@ -2,7 +2,7 @@
 # Scheduler CHÍNH của pipeline — chạy hàng ngày bằng cron.
 #
 # Cài crontab (07:00 giờ VN, server để TZ Asia/Ho_Chi_Minh):
-#   0 7 * * * /mnt/kaggle_data/kaggle_pipeline/scripts/cron_daily.sh >> /mnt/kaggle_data/kaggle_pipeline/logs/cron.log 2>&1
+#   0 7 * * * /bin/bash /mnt/kaggle_data/kaggle_pipeline/scripts/cron_daily.sh >> /mnt/kaggle_data/kaggle_pipeline/logs/cron.log 2>&1
 #
 # Script bù những gì một scheduler cần (vì không dùng Airflow nữa):
 #   - retry mỗi source vài lần (mặc định 2) trước khi báo fail

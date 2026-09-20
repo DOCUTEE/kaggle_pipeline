@@ -48,7 +48,7 @@ python -m pipeline run all    --load-db
 ## Schedule (cron trên host, không phải container)
 
 ```bash
-crontab -l     # 0 7 * * * /mnt/kaggle_data/kaggle_pipeline/scripts/cron_daily.sh
+crontab -l     # 0 7 * * * /bin/bash /mnt/kaggle_data/kaggle_pipeline/scripts/cron_daily.sh
 ```
 
 Cài/ghi lại entry: `deploy/setup_server.sh` (hoặc `deploy/push_to_server.sh` tự thêm nếu thiếu).

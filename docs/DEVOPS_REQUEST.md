@@ -106,7 +106,7 @@ bảng đã tồn tại?          [ ] itviec_jobs  [ ] topcv_jobs  [ ] views (v_
 ### 4.2 Scheduler (cron) + quyền ghi data
 ```
 crontab đã cài?            [ ] có  [ ] chưa     (output: crontab -l)
-entry mong đợi: 0 7 * * * /mnt/kaggle_data/kaggle_pipeline/scripts/cron_daily.sh >> .../logs/cron.log 2>&1
+entry mong đợi: 0 7 * * * /bin/bash /mnt/kaggle_data/kaggle_pipeline/scripts/cron_daily.sh >> .../logs/cron.log 2>&1
 log gần nhất:  ................................................ (logs/pipeline_YYYY-MM-DD.log)
 data/ ghi được bởi user chạy cron?   [ ] có  [ ] chưa
    → nếu chưa: sudo chown -R <user>:<user> /mnt/kaggle_data/kaggle_pipeline/data

@@ -33,10 +33,9 @@ SSH="sshpass -e ssh -o StrictHostKeyChecking=no -o ConnectTimeout=20 ${SERVER_US
 # Các --exclude là những thứ CHỈ có trên server — rsync không xoá path bị exclude.
 RSYNC_ARGS=(
   -avz --delete --timeout=120
-  # --chmod: file trong repo local có thể là 600 (umask của máy dev), rsync -a sẽ
-  # giữ nguyên và container (uid 50000) KHÔNG đọc được → PermissionError khi
-  # import. Chuẩn hoá về 644/755 ngay khi truyền.
-  --chmod=Du=rwx,Dg=rx,Do=rx,Fu=rw,Fg=r,Fo=r
+  # --chmod: file trong repo local có thể là 600 (umask máy dev) → user khác không
+  # đọc được. Chuẩn hoá ngay khi truyền; `X` giữ exec bit cho script (cron cần).
+  --chmod=Du=rwx,Dg=rx,Do=rx,Fu=rwX,Fg=rX,Fo=rX
   -e "ssh -o StrictHostKeyChecking=no -o ConnectTimeout=20"
   --exclude=.git
   --exclude=.venv
@@ -70,6 +69,7 @@ echo "[2/3] compose up (postgres + grafana) + đồng bộ venv host..."
 $SSH "set -e
   cd ${REMOTE_DIR}
   chmod -R a+rX pipeline scripts tests docs deploy infra/grafana 2>/dev/null || true
+  chmod +x scripts/*.sh deploy/*.sh 2>/dev/null || true
   chmod a+r infra/*.sql infra/*.yml 2>/dev/null || true
   chmod 600 infra/.env 2>/dev/null || true
   # data/ có thể chứa file của uid khác (container cũ) → cho cron (host) ghi được
@@ -77,7 +77,8 @@ $SSH "set -e
   # cron là scheduler: đảm bảo entry tồn tại
   chmod +x scripts/cron_daily.sh
   crontab -l 2>/dev/null | grep -qF 'scripts/cron_daily.sh' || {
-    { crontab -l 2>/dev/null; echo '0 7 * * * ${REMOTE_DIR}/scripts/cron_daily.sh >> ${REMOTE_DIR}/logs/cron.log 2>&1'; } | crontab -
+    # /bin/bash + đường dẫn: không phụ thuộc exec bit (rsync/CI có thể strip)
+    { crontab -l 2>/dev/null; echo '0 7 * * * /bin/bash ${REMOTE_DIR}/scripts/cron_daily.sh >> ${REMOTE_DIR}/logs/cron.log 2>&1'; } | crontab -
   }
   docker compose -f infra/docker-compose.yml up -d
   docker compose -f infra/docker-compose.yml ps

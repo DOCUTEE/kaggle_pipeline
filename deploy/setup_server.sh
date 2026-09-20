@@ -21,7 +21,7 @@ echo "[1/5] Syncing code..."
 sshpass -p "${SERVER_PASS}" ssh -o StrictHostKeyChecking=no ${SERVER_USER}@${SERVER_IP} \
     "mkdir -p ${REMOTE_DIR} /mnt/kaggle_data/logs"
 sshpass -p "${SERVER_PASS}" rsync -avz --progress --delete \
-    --chmod=Du=rwx,Dg=rx,Do=rx,Fu=rw,Fg=r,Fo=r \
+    --chmod=Du=rwx,Dg=rx,Do=rx,Fu=rwX,Fg=rX,Fo=rX \
     -e "ssh -o StrictHostKeyChecking=no" \
     --exclude='.git' \
     --exclude='.venv' \
@@ -84,7 +84,7 @@ EOF
 echo "[5/5] Installing crontab (07:00 mỗi ngày)..."
 sshpass -p "${SERVER_PASS}" ssh -o StrictHostKeyChecking=no ${SERVER_USER}@${SERVER_IP} << 'EOF'
 chmod +x /mnt/kaggle_data/kaggle_pipeline/scripts/cron_daily.sh
-LINE="0 7 * * * /mnt/kaggle_data/kaggle_pipeline/scripts/cron_daily.sh >> /mnt/kaggle_data/kaggle_pipeline/logs/cron.log 2>&1"
+LINE="0 7 * * * /bin/bash /mnt/kaggle_data/kaggle_pipeline/scripts/cron_daily.sh >> /mnt/kaggle_data/kaggle_pipeline/logs/cron.log 2>&1"
 if crontab -l 2>/dev/null | grep -qF 'scripts/cron_daily.sh'; then
   echo "  cron đã có sẵn"
 else
